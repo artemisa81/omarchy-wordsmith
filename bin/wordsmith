@@ -520,9 +520,9 @@ worker() {
 
   local prompt; prompt=$(mode_prompt "$mode")
 
-  # For codex, --ignore-user-config is load-bearing: the user's config.toml pins
-  # gpt-5.6-luna at xhigh reasoning with browser/MCP plugins, which turns an
-  # 8-second rewrite into a multi-minute one. See generate() for the per-backend
+  # For codex, --ignore-user-config is load-bearing: a coding-tuned config.toml
+  # (heavyweight model, xhigh reasoning, browser/MCP plugins) turns an 8-second
+  # rewrite into a multi-minute one. See generate() for the per-backend
   # invocations.
   generate "$backend" "$prompt" "$headfile" "$out" "$errf"
   local rc=$?

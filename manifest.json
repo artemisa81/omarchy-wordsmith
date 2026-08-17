@@ -122,7 +122,7 @@
         "key": "reasoningEffort",
         "type": "enum",
         "label": "Reasoning effort",
-        "description": "Rewriting a paragraph does not need deliberation. Your own codex config runs xhigh, which turns an 8-second rewrite into minutes — this widget ignores that config on purpose.",
+        "description": "Rewriting a paragraph does not need deliberation. A codex config tuned for coding often runs xhigh, which turns an 8-second rewrite into minutes — this widget ignores that config on purpose.",
         "options": [
           "low",
           "medium",

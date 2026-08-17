@@ -47,7 +47,7 @@ rewrite, and puts a count above it:
 ```
 ⚠ 1 placeholder to complete before sending
 
-Hi Warathum,
+Hi Alex,
 Please confirm the cut-off date and resolve Row 42 of the tracker by [date].
 ```
 
@@ -195,12 +195,12 @@ call.
 
 ### Why it ignores your codex config
 
-`~/.codex/config.toml` pins `gpt-5.6-luna` at `xhigh` reasoning and enables the
-browser/MCP plugins. That is a good setup for coding and a terrible one for
-rewriting a paragraph: the first version of this widget took **over two minutes**
-per rewrite. Wordsmith runs `codex exec --ignore-user-config` and sets the model
-and effort itself, which brings it to **~7 seconds**. Auth still resolves from
-`CODEX_HOME`, so bypassing the config costs nothing.
+A `~/.codex/config.toml` tuned for coding — a heavyweight model at `xhigh`
+reasoning, browser/MCP plugins enabled — is a terrible setup for rewriting a
+paragraph: on the machine this was built on, the first version took **over two
+minutes** per rewrite. Wordsmith runs `codex exec --ignore-user-config` and sets
+the model and effort itself, which brings it to **~7 seconds**. Auth still
+resolves from `CODEX_HOME`, so bypassing the config costs nothing.
 
 It also runs `-s read-only`, because rewriting text has no business executing
 anything.
