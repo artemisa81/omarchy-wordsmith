@@ -47,13 +47,16 @@ Item {
   readonly property int quotedLines: parseInt(String(state.quotedLines || 0), 10) || 0
   readonly property int placeholderCount: parseInt(String(state.placeholders || 0), 10) || 0
   readonly property var history: state.history || []
-  // Resolved by the script, not by the widget: the live toggle in wordsmith.json
-  // outranks the configured default, so the panel must read back what actually
-  // applies rather than assume its own setting won.
-  readonly property string backend: String(state.backend || defaultBackend)
-  readonly property string backendLabel: String(state.backendLabel || Model.backendLabel(backend))
+  // The SELECTION — the persisted toggle, resolved by the script from
+  // wordsmith.json at every state read. Distinct from state.backend, which is
+  // whatever the last run used: a one-off `run --backend X` from a terminal
+  // must not flip the VIA row or what the next keypress runs.
+  readonly property string backend: String(state.selectedBackend || defaultBackend)
+  readonly property string backendLabel: String(state.selectedBackendLabel || Model.backendLabel(backend))
   readonly property var backends: Model.BACKENDS
-  readonly property string activeModel: String(state.model || "")
+  readonly property string activeModel: String(state.selectedModel || "")
+  // What the last (or in-flight) run actually used — for the hero and history.
+  readonly property string runBackendLabel: String(state.backendLabel || backendLabel)
   readonly property string storedInstruction: String(state.instruction || "")
 
   readonly property string summary: Model.summary(state)

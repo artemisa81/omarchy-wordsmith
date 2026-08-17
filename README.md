@@ -127,6 +127,12 @@ Four, switchable live from the **VIA** row in the panel. The choice persists in
 `~/.config/omarchy/wordsmith.json`, so it outlives the panel and the shell, and it
 outranks the widget's configured default.
 
+A `run --backend X` from a terminal is a **one-off**: it shows up as what the last
+run used (hero, history), but it does not move the VIA row or change what the
+next keypress runs — only the toggle and `wordsmith backend X` do that. In
+`wordsmith state`, `.backend` is the last run and `.selectedBackend` is the
+toggle.
+
 | Backend | How it is reached | Keeps the text off disk? |
 |---|---|---|
 | **ChatGPT** | `codex exec`, signed in with `auth_mode: chatgpt` | Yes — `--ephemeral`, plus a `read-only` sandbox |

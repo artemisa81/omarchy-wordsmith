@@ -194,7 +194,6 @@ cmd_model() {
   mkdir -p "$CFG_DIR"
   local cur='{}'; [[ -r "$CFG" ]] && cur=$(cat "$CFG")
   printf '%s' "$cur" | jq -c --arg k "$(model_key "$b")" --arg m "$m" '.[$k]=$m' > "$CFG.tmp" && mv -f "$CFG.tmp" "$CFG"
-  read_state | jq -c --arg m "$m" '.model=$m' | write_state
   printf '%s\n' "$m"
 }
 
@@ -222,9 +221,6 @@ cmd_backend() {
   # Only the choice is persisted here, never any text - this file is not tmpfs.
   local cur='{}'; [[ -r "$CFG" ]] && cur=$(cat "$CFG")
   printf '%s' "$cur" | jq -c --arg b "$b" '.backend=$b' > "$CFG.tmp" && mv -f "$CFG.tmp" "$CFG"
-  # Reflect it in state at once so the panel does not wait for the next run.
-  read_state | jq -c --arg b "$b" --arg l "$(backend_label "$b")" --arg m "$(backend_model "$b")" \
-    '.backend=$b | .backendLabel=$l | .model=$m' | write_state
   printf '%s\n' "$b"
 }
 
@@ -427,6 +423,16 @@ empty_state() {
 }
 
 read_state() { [[ -r "$STATE" ]] && cat "$STATE" || empty_state; }
+
+# What the widget should display and use for the NEXT run: the persisted toggle,
+# not whatever backend the previous run happened to use. Before this split, a
+# one-off `wordsmith run --backend X` from a terminal leaked into the state file
+# and permanently flipped the widget's backend even though the toggle in
+# wordsmith.json still said otherwise.
+enriched_state() {
+  local sb; sb=$(resolve_backend)
+  read_state | jq -c --arg sb "$sb" --arg sl "$(backend_label "$sb")"                      --arg sm "$(backend_model "$sb")"     '.selectedBackend=$sb | .selectedBackendLabel=$sl | .selectedModel=$sm'
+}
 
 set_state() { # set_state <status> [key value ...]
   local status="$1"; shift
@@ -712,7 +718,7 @@ cmd_clear() {
 
 case "${1:-state}" in
   run)    shift; cmd_run "$@" ;;
-  state)  read_state ;;
+  state)  enriched_state ;;
   modes)    modes_json ;;
   backends) backends_json ;;
   backend)  shift; cmd_backend "${1:-}" ;;

@@ -201,7 +201,7 @@ Panel {
           title: "Wordsmith"
           meta: wordsmith.working ? wordsmith.summary + "…" : wordsmith.summary
           detail: {
-            if (wordsmith.working) return "on " + wordsmith.backendLabel
+            if (wordsmith.working) return "on " + wordsmith.runBackendLabel
             if (wordsmith.done) return Model.elapsed(wordsmith.state) + " · " + Model.deltaLabel(wordsmith.state)
             if (wordsmith.failed) return "failed"
             return "select text, then SUPER+ALT+E"
