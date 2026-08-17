@@ -7,6 +7,36 @@ result in the panel, press `Ctrl+V`.
 It replaces the copy-into-ChatGPT-and-copy-back loop, and every backend bills
 against a **subscription you already pay for** — no API key is involved anywhere.
 
+## Install
+
+```sh
+omarchy plugin add https://github.com/artemisa81/omarchy-wordsmith --enable
+```
+
+Then add the two hotkeys to `~/.config/hypr/bindings.lua` (Hyprland reloads on
+save):
+
+```lua
+o.bind("SUPER + ALT + E", "Wordsmith: rewrite selected text", "omarchy-shell artemisa81.wordsmith go")
+o.bind("SUPER + ALT + W", "Wordsmith: open panel", "omarchy-shell artemisa81.wordsmith toggle")
+```
+
+**Dependencies.** `jq` and `wl-clipboard` (both in a stock Omarchy install), plus
+at least one backend CLI signed in with its subscription: `codex` (the default),
+`claude`, or `opencode` for the OpenCode Go / Ollama Cloud backends. Backends
+whose CLI is missing simply fail with a clear error when selected — nothing is
+required beyond the one you use.
+
+## Remove
+
+```sh
+omarchy plugin remove artemisa81.wordsmith
+```
+
+Delete the two `o.bind` lines from `~/.config/hypr/bindings.lua`, and optionally
+`~/.config/omarchy/wordsmith.json` (the persisted backend/model choice — the only
+file the plugin writes outside its own folder and tmpfs).
+
 ## The gesture
 
 | | |
