@@ -559,9 +559,35 @@ Panel {
 
         PanelSeparator { foreground: root.foreground }
 
+        // The keybindings, on the panel itself rather than only in SUPER+K.
+        // Two rows: the global hotkeys that work anywhere, then the keys that
+        // only exist while this panel is open.
+        Column {
+          width: parent.width
+          spacing: Style.space(2)
+
+          Text {
+            width: parent.width
+            text: "󰌌  SUPER+ALT+E rewrite selection · SUPER+ALT+W this panel"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
+          Text {
+            width: parent.width
+            text: "in panel: 1–5 mode · c copy · r again · x clear · Esc close"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+        }
+
         Text {
           width: parent.width
-          text: "1–5 pick a mode · c copy · r again · x clear. " + Model.privacyNote(wordsmith.backend)
+          text: Model.privacyNote(wordsmith.backend)
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
