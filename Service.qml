@@ -81,6 +81,14 @@ Item {
     // for "gpt-5.6-terra". The widget's values are defaults, and go through the
     // --default-model-* flags below.
     return [
+      // The backend the panel is *showing* is passed explicitly on every call.
+      // Without it the script re-resolved the backend from wordsmith.json while
+      // the panel read it from the state file, and when those two disagreed the
+      // model list belonged to one backend and the label to another — the
+      // "dropdown does not update" symptom. This also guarantees that what the
+      // panel displays is what actually runs, and that picking a model writes it
+      // under the backend you are looking at.
+      "--backend", backend,
       "--effort", effort,
       "--source", source,
       "--timeout", String(timeoutSec),
@@ -125,16 +133,38 @@ Item {
   // The offered models come from the script rather than a second copy of the
   // list in QML, so there is one place to edit when a provider adds a model.
   property var modelOptions: []
-  function refreshModels() { if (!modelsProcess.running) modelsProcess.running = true }
+
+  // Which backend the in-flight `models` call was launched for, and whether a
+  // newer request arrived while it ran. Both are needed because the list is
+  // fetched twice per switch: once right after the action (when `backend` is
+  // still the old value, since the state re-read has not landed) and again when
+  // `backend` actually changes. Without tracking, the first answer wins and the
+  // list sits one backend behind every switch.
+  property string _modelsFor: ""
+  property bool _modelsPending: false
+
+  function refreshModels() {
+    if (modelsProcess.running) { _modelsPending = true; return }
+    _modelsFor = backend
+    modelsProcess.running = true
+  }
   function copyIndex(i) { act(["copy", "--index", String(i)]) }
   function cancel() { act(["cancel"]) }
   function clear() { act(["clear"]) }
 
+  // Holds the most recent request made while a previous one was still running.
+  // Dropping it instead — the original behaviour — made a click on a VIA button
+  // do nothing at all whenever an action happened to be in flight, which reads
+  // as "the dropdown does not update".
+  property var _queued: null
+
   function act(args) {
-    if (actionProcess.running) return
+    if (actionProcess.running) { _queued = args; return }
     actionProcess.command = [exe].concat(args).concat(flags())
     actionProcess.running = true
   }
+
+  onBackendChanged: refreshModels()
 
   Timer {
     // Two speeds on purpose. A rewrite lands in six to nine seconds, so while
@@ -151,11 +181,20 @@ Item {
   Process {
     id: modelsProcess
     running: false
-    command: [root.exe, "models"].concat(root.flags())
+    command: [root.exe, "models"].concat(root.flags())  // --backend comes from flags()
     stdout: StdioCollector { id: modelsStdout; waitForEnd: true }
     onExited: function(exitCode) {
       var parsed = Model.parse(modelsStdout.text)
-      if (parsed && parsed.options) root.modelOptions = parsed.options
+      // Accept only a list that belongs to the backend on screen. Showing a
+      // stale list is worse than briefly showing the previous one, because the
+      // dropdown would then offer models the active backend cannot serve.
+      if (parsed && parsed.options && String(parsed.backend) === root.backend)
+        root.modelOptions = parsed.options
+
+      if (root._modelsPending || root._modelsFor !== root.backend) {
+        root._modelsPending = false
+        Qt.callLater(root.refreshModels)
+      }
     }
   }
 
@@ -195,6 +234,11 @@ Item {
         root.lastError = String(actionStderr.text || "").trim() || "wordsmith command failed"
       root.refresh()
       root.refreshModels()
+      if (root._queued) {
+        var next = root._queued
+        root._queued = null
+        Qt.callLater(function() { root.act(next) })
+      }
     }
   }
 

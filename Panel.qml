@@ -135,6 +135,16 @@ Panel {
     function status(): string { return wordsmith.summary }
     function result(): string { return wordsmith.result }
     function placeholders(): string { return String(wordsmith.placeholderCount) }
+
+    // Same call the VIA buttons make, exposed so the backend switch can be
+    // driven and inspected from a terminal.
+    function via(name: string): void { wordsmith.setBackend(name) }
+    function pickModel(name: string): void { wordsmith.setModel(name) }
+    function view(): string {
+      return "backend=" + wordsmith.backend
+        + " activeModel=" + wordsmith.activeModel
+        + " options=" + JSON.stringify(wordsmith.modelOptions)
+    }
   }
 
   BarIconButton {

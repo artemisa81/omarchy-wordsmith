@@ -161,7 +161,9 @@ prompts, so the quoted-thread guard, bracket placeholders and fact check behave
 identically across all four.
 
 Pick a model live from the dropdown under the VIA row — the list comes from the
-script, so there is one place to edit when a provider adds a model.
+script, so there is one place to edit when a provider adds a model. Each backend
+remembers its own model, so switching to Claude and back to ChatGPT does not
+disturb either choice.
 
 ## Configuration
 
@@ -214,6 +216,11 @@ bin/wordsmith backends                         # what is available, with models
 bin/wordsmith model claude-opus-4-8            # set the model for that backend
 bin/wordsmith models                           # models offered for it
 bin/wordsmith run --backend claude --model claude-sonnet-5 --mode shorten
+
+# Driving the widget itself (same calls the VIA row and dropdown make):
+omarchy-shell artemisa81.wordsmith via claude
+omarchy-shell artemisa81.wordsmith pickModel claude-sonnet-5
+omarchy-shell artemisa81.wordsmith view      # backend, active model, offered models
 bin/wordsmith run --mode custom --instruction "make it two sentences"
 echo "some text" | bin/wordsmith run --stdin --mode shorten
 bin/wordsmith state                            # current job as JSON
