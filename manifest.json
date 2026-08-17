@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Wordsmith",
-    "description": "Rewrite selected text in one of four tones, review it side by side with the original, and paste.",
+    "description": "Rewrite selected text in five modes, review it against the original with anything still to fill in highlighted, and paste.",
     "category": "Productivity",
     "allowMultiple": false,
     "defaultSection": "right",
@@ -26,14 +26,15 @@
       "autoCopy": true,
       "notify": true,
       "timeoutSec": 90,
-      "maxChars": 20000
+      "maxChars": 20000,
+      "preserveQuoted": true
     },
     "schema": [
       {
         "key": "defaultMode",
         "type": "enum",
         "label": "Default mode",
-        "description": "The mode SUPER+ALT+E uses. The other three are always one click away in the panel.",
+        "description": "The mode SUPER+ALT+E uses. The others are one keypress away in the panel. Custom is excluded here because it needs an instruction typed first.",
         "options": [
           "professional",
           "shorten",
@@ -80,6 +81,13 @@
           "clipboard"
         ],
         "defaultValue": "auto"
+      },
+      {
+        "key": "preserveQuoted",
+        "type": "boolean",
+        "label": "Never rewrite quoted threads",
+        "description": "Split a quoted chain (From:, -----Original Message-----, >) off your draft, keep it out of the request entirely, and reattach it byte for byte. Off means a colleague's quoted words get reworded under their name.",
+        "defaultValue": true
       },
       {
         "key": "autoCopy",

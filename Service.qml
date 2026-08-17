@@ -23,6 +23,7 @@ Item {
   readonly property string source: String(setting("source", "auto"))
   readonly property bool autoCopy: setting("autoCopy", true) !== false
   readonly property bool notifyEnabled: setting("notify", true) !== false
+  readonly property bool preserveQuoted: setting("preserveQuoted", true) !== false
   readonly property int timeoutSec: intSetting("timeoutSec", 90, 15, 300)
   readonly property int maxChars: intSetting("maxChars", 20000, 500, 100000)
 
@@ -35,6 +36,10 @@ Item {
   readonly property string modeLabel: String(state.modeLabel || "")
   readonly property string errorText: String(state.error || "")
   readonly property bool hasResult: result.trim().length > 0
+  readonly property int quotedLines: parseInt(String(state.quotedLines || 0), 10) || 0
+  readonly property int placeholderCount: parseInt(String(state.placeholders || 0), 10) || 0
+  readonly property var history: state.history || []
+  readonly property string storedInstruction: String(state.instruction || "")
 
   readonly property string summary: Model.summary(state)
   readonly property var modes: Model.MODES
@@ -62,7 +67,8 @@ Item {
       "--timeout", String(timeoutSec),
       "--max-chars", String(maxChars),
       autoCopy ? "--copy" : "--no-copy",
-      notifyEnabled ? "--notify" : "--no-notify"
+      notifyEnabled ? "--notify" : "--no-notify",
+      preserveQuoted ? "--quoted" : "--no-quoted"
     ]
   }
 
@@ -70,14 +76,24 @@ Item {
     if (!stateProcess.running) stateProcess.running = true
   }
 
-  function run(mode) {
+  function run(mode, instruction) {
     if (actionProcess.running) return
-    actionProcess.command = [exe, "run", "--mode", String(mode || defaultMode)].concat(flags())
+    var cmd = [exe, "run", "--mode", String(mode || defaultMode)]
+    if (instruction !== undefined && String(instruction).length > 0)
+      cmd = cmd.concat(["--instruction", String(instruction)])
+    actionProcess.command = cmd.concat(flags())
     actionProcess.running = true
   }
 
-  function rerun() { run(state.mode || defaultMode) }
+  // Rerunning custom without carrying the instruction forward would silently
+  // fall back to an error, so the last one is replayed from state.
+  function rerun() {
+    var m = state.mode || defaultMode
+    run(m, m === "custom" ? storedInstruction : undefined)
+  }
+
   function copy() { act(["copy"]) }
+  function copyIndex(i) { act(["copy", "--index", String(i)]) }
   function cancel() { act(["cancel"]) }
   function clear() { act(["clear"]) }
 

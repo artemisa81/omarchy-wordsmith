@@ -17,19 +17,48 @@ Panel {
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
-  // Idle is the common case for this widget — it spends most of the day with
-  // nothing to say — so it recedes rather than sitting there at full strength.
+  // No explicit fallback list here on purpose: JetBrainsMono Nerd Font has no
+  // Thai block, but Qt substitutes per character at render time, so Thai and CJK
+  // come out readable while Latin keeps the mono face. Verified with Thai text
+  // in both the original and rewrite panes.
+
+  // Instruction for Custom mode. Lives on the panel so it survives closing and
+  // reopening, and is seeded from state so it survives a shell restart.
+  property string customInstruction: ""
+  property bool _instructionSeeded: false
+
+  // Which result is on screen: 0 is the newest, higher indexes walk back through
+  // history so tones can be compared without paying for another rewrite.
+  property int viewIndex: 0
+
+  readonly property var viewedEntry: viewIndex > 0 && viewIndex < wordsmith.history.length
+    ? wordsmith.history[viewIndex] : null
+  readonly property string viewedResult: viewedEntry ? String(viewedEntry.result || "") : wordsmith.result
+  readonly property string viewedLabel: viewedEntry ? String(viewedEntry.modeLabel || "") : wordsmith.modeLabel
+
+  readonly property int viewedPlaceholders: Model.placeholders(viewedResult).length
+  // Only checked against the live original: an older history entry may have come
+  // from a different selection, and a fact check on the wrong baseline is worse
+  // than none.
+  readonly property string droppedNote: viewIndex === 0
+    ? Model.droppedNote(wordsmith.original, wordsmith.result) : ""
+
+  function cssColor(c) {
+    return "rgba(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + ","
+                   + Math.round(c.b * 255) + "," + c.a + ")"
+  }
+
   readonly property color barIconColor: {
     if (wordsmith.failed || wordsmith.lastError !== "") return urgent
     if (wordsmith.working) return accent
-    if (wordsmith.done) return barForeground
+    if (wordsmith.done) return wordsmith.placeholderCount > 0 ? urgent : barForeground
     return Qt.darker(barForeground, 1.9)
   }
 
   readonly property string barGlyph: {
     if (wordsmith.failed || wordsmith.lastError !== "") return "󰀦"
     if (wordsmith.working) return "󰑐"
-    if (wordsmith.done) return "󰄬"
+    if (wordsmith.done) return wordsmith.placeholderCount > 0 ? "󰀦" : "󰄬"
     return "󰙏"
   }
 
@@ -37,10 +66,13 @@ Panel {
     if (wordsmith.lastError !== "") return "Wordsmith — " + wordsmith.lastError
     if (wordsmith.working) return "Wordsmith — " + wordsmith.summary + "…"
     if (wordsmith.failed) return "Wordsmith — " + wordsmith.errorText
-    if (wordsmith.done)
-      return "Wordsmith — " + wordsmith.modeLabel + " ready"
-        + (wordsmith.autoCopy ? ", on the clipboard" : "")
-        + "\nClick to review · " + Model.elapsed(wordsmith.state)
+    if (wordsmith.done) {
+      var t = "Wordsmith — " + wordsmith.modeLabel + " ready"
+      if (wordsmith.autoCopy) t += ", on the clipboard"
+      if (wordsmith.placeholderCount > 0)
+        t += "\n" + Model.placeholderNote(wordsmith.result)
+      return t + "\nClick to review · " + Model.elapsed(wordsmith.state)
+    }
     return "Wordsmith — select text, then SUPER+ALT+E"
   }
 
@@ -52,6 +84,19 @@ Panel {
     settings: root.settings
   }
 
+  // A finished rewrite always shows itself, rather than leaving you looking at
+  // whichever history entry you were reading when it landed.
+  Connections {
+    target: wordsmith
+    function onResultChanged() { root.viewIndex = 0 }
+    function onStoredInstructionChanged() {
+      if (!root._instructionSeeded && wordsmith.storedInstruction.length > 0) {
+        root.customInstruction = wordsmith.storedInstruction
+        root._instructionSeeded = true
+      }
+    }
+  }
+
   onOpenedChanged: if (opened) {
     wordsmith.refresh()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -60,9 +105,6 @@ Panel {
   IpcHandler {
     target: root.ipcTarget
 
-    // What the Hyprland keybindings call. `rewrite` deliberately opens the
-    // panel too: the whole point of the review flow is that you see the result
-    // before it goes anywhere near your draft.
     // `go` is what the keybinding calls: no argument, so the Hyprland side
     // needs no quoting, and the mode comes from the widget's own settings.
     function go(): void { wordsmith.run(wordsmith.defaultMode); root.open() }
@@ -75,6 +117,11 @@ Panel {
     function shorten(): void { wordsmith.run("shorten"); root.open() }
     function soften(): void { wordsmith.run("soften"); root.open() }
     function firm(): void { wordsmith.run("firm"); root.open() }
+    function custom(instruction: string): void {
+      if (instruction && instruction.length > 0) root.customInstruction = instruction
+      wordsmith.run("custom", root.customInstruction)
+      root.open()
+    }
 
     function open(): void { root.open() }
     function close(): void { root.close() }
@@ -86,6 +133,7 @@ Panel {
     function refresh(): string { wordsmith.refresh(); return "ok" }
     function status(): string { return wordsmith.summary }
     function result(): string { return wordsmith.result }
+    function placeholders(): string { return String(wordsmith.placeholderCount) }
   }
 
   BarIconButton {
@@ -96,8 +144,7 @@ Panel {
     foreground: root.barIconColor
     tooltipText: root.tooltip
     onPressed: function(buttonCode) {
-      // Right-click reruns the last mode — the "that wasn't quite it, try
-      // again" gesture, without opening anything.
+      // Right-click reruns the last mode — the "not quite, try again" gesture.
       if (buttonCode === Qt.RightButton) wordsmith.rerun()
       else if (buttonCode === Qt.MiddleButton) wordsmith.copy()
       else root.toggle()
@@ -125,7 +172,8 @@ Panel {
         else if (k === "2") wordsmith.run("shorten")
         else if (k === "3") wordsmith.run("soften")
         else if (k === "4") wordsmith.run("firm")
-        else if (k === "c") wordsmith.copy()
+        else if (k === "5") instructionField.forceActiveFocus()
+        else if (k === "c") wordsmith.copyIndex(root.viewIndex)
         else if (k === "r") wordsmith.rerun()
         else if (k === "x") wordsmith.working ? wordsmith.cancel() : wordsmith.clear()
       }
@@ -153,7 +201,7 @@ Panel {
           iconComponent: Component {
             Text {
               text: root.barGlyph
-              color: root.barIconColor === Qt.darker(root.barForeground, 1.9) ? root.dim : root.barIconColor
+              color: wordsmith.status === "idle" ? root.dim : root.barIconColor
               font.family: root.fontFamily
               font.pixelSize: Style.font.display
             }
@@ -161,11 +209,11 @@ Panel {
           trailingControl: Component {
             PanelActionButton {
               iconText: wordsmith.working ? "󰅙" : "󰆏"
-              enabled: wordsmith.working || wordsmith.hasResult
+              enabled: wordsmith.working || root.viewedResult.length > 0
               foreground: hero.foreground
               fontFamily: hero.fontFamily
               tooltipText: wordsmith.working ? "Cancel" : "Copy the rewrite"
-              onClicked: wordsmith.working ? wordsmith.cancel() : wordsmith.copy()
+              onClicked: wordsmith.working ? wordsmith.cancel() : wordsmith.copyIndex(root.viewIndex)
             }
           }
         }
@@ -216,8 +264,30 @@ Panel {
               foreground: root.foreground
               fontFamily: root.fontFamily
               fontSize: Style.font.bodySmall
-              onClicked: wordsmith.run(modelData.id)
+              onClicked: {
+                if (modelData.id === "custom") {
+                  if (root.customInstruction.trim().length === 0) instructionField.forceActiveFocus()
+                  else wordsmith.run("custom", root.customInstruction)
+                } else {
+                  wordsmith.run(modelData.id)
+                }
+              }
             }
+          }
+
+          // The four fixed modes cannot express "keep the bullets but make it
+          // formal", which is most of what you actually want on a given day.
+          TextField {
+            id: instructionField
+            width: parent.width
+            placeholderText: "5  Your own instruction, then Enter"
+            foreground: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            enabled: !wordsmith.working
+            Component.onCompleted: text = root.customInstruction
+            onTextChanged: root.customInstruction = text
+            onAccepted: if (text.trim().length > 0) wordsmith.run("custom", text)
           }
         }
 
@@ -247,22 +317,59 @@ Panel {
             maximumLineCount: 3
             elide: Text.ElideRight
           }
+
+          // Reassurance that a colleague's quoted mail was not reworded — the
+          // model never saw it, and it is reattached byte for byte.
+          Text {
+            visible: wordsmith.quotedLines > 0
+            width: parent.width
+            text: "󰅌  " + Model.quotedNote(wordsmith.state) + " — the quoted thread was not sent to the model"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
         }
 
         PanelSeparator {
-          visible: wordsmith.hasResult
+          visible: root.viewedResult.length > 0
           foreground: root.foreground
         }
 
         Column {
           width: parent.width
           spacing: Style.space(6)
-          visible: wordsmith.hasResult
+          visible: root.viewedResult.length > 0
 
           PanelSectionHeader {
-            text: "REWRITE · " + Model.charCount(wordsmith.state.resultChars)
+            text: (root.viewIndex === 0 ? "REWRITE" : "EARLIER · " + root.viewedLabel.toUpperCase())
+              + " · " + Model.charCount(root.viewedResult.length)
             foreground: root.foreground
             fontFamily: root.fontFamily
+          }
+
+          // The thing the user asked for: anything they still have to fill in is
+          // bracketed by the model and painted in the urgent colour here, so it
+          // cannot be skimmed past on the way to Ctrl+V.
+          Text {
+            visible: root.viewedPlaceholders > 0
+            width: parent.width
+            text: "󰀦  " + Model.placeholderNote(root.viewedResult)
+            color: root.urgent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            font.bold: true
+            wrapMode: Text.WordWrap
+          }
+
+          Text {
+            visible: root.droppedNote !== ""
+            width: parent.width
+            text: "󰀦  " + root.droppedNote
+            color: root.urgent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
           }
 
           // Selectable and scrollable rather than a flat label: sometimes you
@@ -278,11 +385,11 @@ Panel {
             TextEdit {
               id: resultText
               width: parent.width
-              text: wordsmith.result
+              textFormat: TextEdit.RichText
+              text: Model.highlightHtml(root.viewedResult, root.cssColor(root.foreground), root.cssColor(root.urgent))
               readOnly: true
               selectByMouse: true
               wrapMode: TextEdit.WordWrap
-              color: root.foreground
               selectionColor: root.accent
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
@@ -295,12 +402,14 @@ Panel {
 
             Button {
               text: "󰆏  Copy"
-              tooltipText: "Put the rewrite on the clipboard, then Ctrl+V into your draft"
+              tooltipText: root.viewedPlaceholders > 0
+                ? "Copies with the [placeholders] still in — complete them in your draft"
+                : "Put the rewrite on the clipboard, then Ctrl+V into your draft"
               bordered: true
-              foreground: root.foreground
+              foreground: root.viewedPlaceholders > 0 ? root.urgent : root.foreground
               fontFamily: root.fontFamily
               fontSize: Style.font.bodySmall
-              onClicked: wordsmith.copy()
+              onClicked: wordsmith.copyIndex(root.viewIndex)
             }
 
             Button {
@@ -321,7 +430,43 @@ Panel {
               foreground: root.foreground
               fontFamily: root.fontFamily
               fontSize: Style.font.bodySmall
-              onClicked: wordsmith.clear()
+              onClicked: { root.viewIndex = 0; wordsmith.clear() }
+            }
+          }
+        }
+
+        // Comparing tones used to mean losing the previous answer. These recall
+        // earlier results from tmpfs — no second model call.
+        Column {
+          width: parent.width
+          spacing: Style.space(6)
+          visible: wordsmith.history.length > 1
+
+          PanelSectionHeader {
+            text: "EARLIER RESULTS"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          Row {
+            width: parent.width
+            spacing: Style.space(6)
+
+            Repeater {
+              model: wordsmith.history
+              Button {
+                required property var modelData
+                required property int index
+                bordered: true
+                selected: root.viewIndex === index
+                text: index === 0 ? "current" : String(modelData.modeLabel || modelData.mode || "?")
+                tooltipText: (modelData.placeholders > 0 ? modelData.placeholders + " placeholder(s) · " : "")
+                  + Model.charCount(modelData.resultChars)
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                fontSize: Style.font.caption
+                onClicked: root.viewIndex = index
+              }
             }
           }
         }
@@ -330,7 +475,7 @@ Panel {
 
         Text {
           width: parent.width
-          text: "1–4 pick a mode · c copy · r again · x clear. "
+          text: "1–5 pick a mode · c copy · r again · x clear. "
             + "Text is held in tmpfs and Codex runs with --ephemeral, so nothing is written to disk — but the words do go to OpenAI under your ChatGPT plan."
           color: root.dim
           font.family: root.fontFamily

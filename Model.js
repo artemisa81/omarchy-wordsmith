@@ -92,3 +92,120 @@ function deltaLabel(state) {
   if (pct === 0) return "same length"
   return (pct > 0 ? "+" : "") + pct + "%"
 }
+
+// ---------------------------------------------------------- placeholders -----
+
+// The model is told to mark anything it could not fill in as [like this]. That
+// convention only earns its keep if the marks are impossible to miss on the way
+// past, so the panel renders them in the urgent colour rather than as ordinary
+// prose. Plain-text copy keeps the brackets, which is what survives into the
+// mail as the reminder.
+var PLACEHOLDER_RE = /\[[^\][]{1,60}\]/g
+
+function placeholders(text) {
+  var m = String(text || "").match(PLACEHOLDER_RE)
+  return m ? m : []
+}
+
+function escapeHtml(s) {
+  return String(s === undefined || s === null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+}
+
+// Escaping happens before the bracket pass so a literal "<" in the mail cannot
+// smuggle markup in, and the bracket characters survive escaping untouched.
+function highlightHtml(text, bodyColor, markColor) {
+  var html = escapeHtml(text)
+  html = html.replace(PLACEHOLDER_RE, function(match) {
+    return '<span style="color:' + markColor + '; font-weight:bold">' + match + '</span>'
+  })
+  html = html.replace(/\r\n/g, "\n").replace(/\n/g, "<br/>")
+  return '<span style="color:' + bodyColor + '; white-space:pre-wrap">' + html + '</span>'
+}
+
+function placeholderNote(text) {
+  var n = placeholders(text).length
+  if (n === 0) return ""
+  return n === 1
+    ? "1 placeholder to complete before sending"
+    : n + " placeholders to complete before sending"
+}
+
+// ---------------------------------------------------------- dropped facts ----
+
+// The expensive failure here is not clumsy prose, it is a figure quietly going
+// missing — row 42 becoming "the relevant row", or an invoice number vanishing.
+//
+// Deliberately narrow: numbers of two or more digits, percentages, money,
+// emails and URLs. Single digits are excluded because a rewrite spelling "3" as
+// "three" is correct and would otherwise cry wolf, and names are excluded
+// because they are rephrased legitimately all the time. A check that fires on
+// nothing real gets ignored, which is worse than not having one.
+function factTokens(text) {
+  var s = String(text || "")
+  var out = []
+  var res = [
+    /https?:\/\/[^\s<>"')\]]+/g,
+    /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,
+    /[$€£¥฿]\s?\d[\d.,]*/g,
+    /\b\d[\d.,]*\s?%/g,
+    /\b\d{2}[\d.,:\/-]*\b/g
+  ]
+  for (var i = 0; i < res.length; i++) {
+    var m = s.match(res[i])
+    if (m) for (var j = 0; j < m.length; j++) {
+      var t = String(m[j]).replace(/[.,;:]+$/, "")
+      if (t.length > 0 && out.indexOf(t) === -1) out.push(t)
+    }
+  }
+  // The patterns overlap on purpose — "12%" and "$1,200" are also matched by the
+  // bare-number pattern. Report the richer token only, or the warning reads
+  // "12%, 12" and looks broken.
+  return out.filter(function(t) {
+    return !out.some(function(u) { return u !== t && u.indexOf(t) !== -1 })
+  })
+}
+
+function digitsOf(s) { return String(s).replace(/[^\d]/g, "") }
+
+function droppedFacts(original, result) {
+  if (!original || !result) return []
+  var toks = factTokens(original)
+  var res = String(result)
+  var resDigits = digitsOf(res)
+  var missing = []
+  for (var i = 0; i < toks.length; i++) {
+    var t = toks[i]
+    if (res.indexOf(t) !== -1) continue
+    // "1,000" rewritten as "1000" is not a dropped fact.
+    var d = digitsOf(t)
+    if (d.length > 0 && resDigits.indexOf(d) !== -1) continue
+    missing.push(t)
+  }
+  return missing
+}
+
+function droppedNote(original, result) {
+  var m = droppedFacts(original, result)
+  if (m.length === 0) return ""
+  var shown = m.slice(0, 4).join(", ")
+  return "Not found in the rewrite: " + shown + (m.length > 4 ? " (+" + (m.length - 4) + " more)" : "")
+}
+
+// -------------------------------------------------------------- history ------
+
+function historyLabel(entry, index) {
+  if (!entry) return ""
+  var label = String(entry.modeLabel || entry.mode || "rewrite")
+  if (entry.mode === "custom") label = "Custom"
+  return (index === 0 ? "current" : label)
+}
+
+function quotedNote(state) {
+  var n = Number(state.quotedLines)
+  if (!isFinite(n) || n <= 0) return ""
+  return n + " quoted line" + (n === 1 ? "" : "s") + " left untouched"
+}
