@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "id": "artemisa81.wordsmith",
+  "name": "Wordsmith",
+  "version": "1.0.0",
+  "author": "artemisa81",
+  "license": "MIT",
+  "description": "Rewrite the text you have selected — Outlook drafts, replies, anything — with Codex running on your existing ChatGPT plan. Select, press a key, read the result, paste.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Wordsmith",
+    "description": "Rewrite selected text in one of four tones, review it side by side with the original, and paste.",
+    "category": "Productivity",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "defaultMode": "professional",
+      "model": "gpt-5.6-terra",
+      "reasoningEffort": "low",
+      "source": "auto",
+      "autoCopy": true,
+      "notify": true,
+      "timeoutSec": 90,
+      "maxChars": 20000
+    },
+    "schema": [
+      {
+        "key": "defaultMode",
+        "type": "enum",
+        "label": "Default mode",
+        "description": "The mode SUPER+ALT+E uses. The other three are always one click away in the panel.",
+        "options": [
+          "professional",
+          "shorten",
+          "soften",
+          "firm"
+        ],
+        "defaultValue": "professional"
+      },
+      {
+        "key": "model",
+        "type": "enum",
+        "label": "Model",
+        "description": "Which model does the rewriting. All of these bill against your ChatGPT plan, not an API key. Latency is dominated by startup rather than model size, so the larger ones cost you very little time.",
+        "options": [
+          "gpt-5.6-terra",
+          "gpt-5.6-sol",
+          "gpt-5.6-luna",
+          "gpt-5.5",
+          "gpt-5.4",
+          "gpt-5.4-mini"
+        ],
+        "defaultValue": "gpt-5.6-terra"
+      },
+      {
+        "key": "reasoningEffort",
+        "type": "enum",
+        "label": "Reasoning effort",
+        "description": "Rewriting a paragraph does not need deliberation. Your own codex config runs xhigh, which turns an 8-second rewrite into minutes — this widget ignores that config on purpose.",
+        "options": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "defaultValue": "low"
+      },
+      {
+        "key": "source",
+        "type": "enum",
+        "label": "Where to read the text from",
+        "description": "Auto takes your drag-selection when there is one and falls back to the clipboard. Choose clipboard if you would rather always press Ctrl+C first.",
+        "options": [
+          "auto",
+          "primary",
+          "clipboard"
+        ],
+        "defaultValue": "auto"
+      },
+      {
+        "key": "autoCopy",
+        "type": "boolean",
+        "label": "Copy the result automatically",
+        "description": "Put the rewrite on the clipboard the moment it is ready, so the whole gesture ends at Ctrl+V. This does overwrite whatever you had copied.",
+        "defaultValue": true
+      },
+      {
+        "key": "notify",
+        "type": "boolean",
+        "label": "Notify when ready",
+        "description": "A rewrite takes a few seconds, which is long enough to look away. Worth leaving on.",
+        "defaultValue": true
+      },
+      {
+        "key": "timeoutSec",
+        "type": "integer",
+        "label": "Timeout (seconds)",
+        "description": "Abandon a rewrite that has not finished in this long.",
+        "min": 15,
+        "max": 300,
+        "step": 5,
+        "defaultValue": 90
+      },
+      {
+        "key": "maxChars",
+        "type": "integer",
+        "label": "Maximum selection (characters)",
+        "description": "Refuse selections larger than this, so a stray Ctrl+A does not send an entire mailbox to the model.",
+        "min": 500,
+        "max": 100000,
+        "step": 500,
+        "defaultValue": 20000
+      }
+    ]
+  }
+}
