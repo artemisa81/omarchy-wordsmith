@@ -20,14 +20,18 @@
     "defaultSection": "right",
     "defaults": {
       "defaultMode": "professional",
-      "model": "gpt-5.6-terra",
+      "model": "gpt-5.6-sol",
       "reasoningEffort": "low",
       "source": "auto",
       "autoCopy": true,
       "notify": true,
       "timeoutSec": 90,
       "maxChars": 20000,
-      "preserveQuoted": true
+      "preserveQuoted": true,
+      "backend": "codex",
+      "goModel": "opencode-go/deepseek-v4-flash",
+      "ollamaModel": "ollama-cloud/glm-5.2",
+      "claudeModel": "claude-opus-4-8"
     },
     "schema": [
       {
@@ -44,19 +48,75 @@
         "defaultValue": "professional"
       },
       {
+        "key": "backend",
+        "type": "enum",
+        "label": "Default backend",
+        "description": "Which subscription answers by default. All four are plans you already pay for, not metered API keys. The panel switches live and that choice wins over this one. codex and claude write nothing to disk; the opencode backends record prompts in their own database and the session is deleted after each rewrite.",
+        "options": [
+          "codex",
+          "opencode-go",
+          "ollama-cloud",
+          "claude"
+        ],
+        "defaultValue": "codex"
+      },
+      {
+        "key": "goModel",
+        "type": "enum",
+        "label": "OpenCode Go model",
+        "description": "Used when the backend is OpenCode Go. deepseek-v4-flash is the only quick one here (9.4s); glm-5.3 took 52s and kimi-k3 25s on the same draft.",
+        "options": [
+          "opencode-go/deepseek-v4-flash",
+          "opencode-go/glm-5.3",
+          "opencode-go/kimi-k3",
+          "opencode-go/gpt-5.6-luna",
+          "opencode-go/grok-4.5",
+          "opencode-go/deepseek-v4-pro"
+        ],
+        "defaultValue": "opencode-go/deepseek-v4-flash"
+      },
+      {
+        "key": "ollamaModel",
+        "type": "enum",
+        "label": "Ollama Cloud model",
+        "description": "Used when the backend is Ollama Cloud. glm-5.2 was the fastest model of any backend tested (5.1s). Avoid gpt-oss:20b: it inverted the meaning of a draft, turning 'push the shutdown' into 'advancing' it.",
+        "options": [
+          "ollama-cloud/glm-5.2",
+          "ollama-cloud/gpt-oss:120b",
+          "ollama-cloud/gpt-oss:20b",
+          "ollama-cloud/kimi-k3",
+          "ollama-cloud/minimax-m3",
+          "ollama-cloud/mistral-large-3:675b"
+        ],
+        "defaultValue": "ollama-cloud/glm-5.2"
+      },
+      {
+        "key": "claudeModel",
+        "type": "enum",
+        "label": "Claude model",
+        "description": "Used when the backend is Claude, called through the claude CLI directly rather than opencode. Opus 4.8 was both fastest and best (6.1s); haiku-4-5 took 34s, so it is not the cheap option it looks like.",
+        "options": [
+          "claude-opus-4-8",
+          "claude-sonnet-5",
+          "claude-haiku-4-5",
+          "claude-opus-5"
+        ],
+        "defaultValue": "claude-opus-4-8"
+      },
+      {
         "key": "model",
         "type": "enum",
-        "label": "Model",
-        "description": "Which model does the rewriting. All of these bill against your ChatGPT plan, not an API key. Latency is dominated by startup rather than model size, so the larger ones cost you very little time.",
+        "label": "ChatGPT (codex) model",
+        "description": "Used when the backend is ChatGPT. gpt-5.6-sol was the quickest of these on a real draft (6.8s); gpt-5.4-mini left informal phrasing in place.",
         "options": [
-          "gpt-5.6-terra",
           "gpt-5.6-sol",
+          "gpt-5.6-terra",
           "gpt-5.6-luna",
           "gpt-5.5",
           "gpt-5.4",
           "gpt-5.4-mini"
         ],
-        "defaultValue": "gpt-5.6-terra"
+        "defaultValue": "gpt-5.6-sol"
       },
       {
         "key": "reasoningEffort",

@@ -99,6 +99,7 @@ Panel {
 
   onOpenedChanged: if (opened) {
     wordsmith.refresh()
+    wordsmith.refreshModels()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
@@ -190,7 +191,7 @@ Panel {
           title: "Wordsmith"
           meta: wordsmith.working ? wordsmith.summary + "…" : wordsmith.summary
           detail: {
-            if (wordsmith.working) return "on your ChatGPT plan"
+            if (wordsmith.working) return "on " + wordsmith.backendLabel
             if (wordsmith.done) return Model.elapsed(wordsmith.state) + " · " + Model.deltaLabel(wordsmith.state)
             if (wordsmith.failed) return "failed"
             return "select text, then SUPER+ALT+E"
@@ -232,6 +233,77 @@ Panel {
           font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
           wrapMode: Text.WordWrap
+        }
+
+        PanelSeparator { foreground: root.foreground }
+
+        // Which subscription answers. Switching writes the choice to
+        // wordsmith.json through the script, so it outlives the panel and the
+        // shell, and the script reports back what actually resolved.
+        Column {
+          width: parent.width
+          spacing: Style.space(6)
+
+          PanelSectionHeader {
+            text: "VIA"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          Row {
+            width: parent.width
+            spacing: Style.space(6)
+
+            Repeater {
+              model: wordsmith.backends
+              Button {
+                required property var modelData
+                bordered: true
+                selected: wordsmith.backend === modelData.id
+                text: modelData.label
+                tooltipText: modelData.hint
+                enabled: !wordsmith.working
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                fontSize: Style.font.caption
+                onClicked: wordsmith.setBackend(modelData.id)
+              }
+            }
+          }
+
+          // Model choice for whichever backend is active. Switching persists
+          // through the script, so it survives the panel and the shell.
+          Dropdown {
+            width: parent.width
+            showLabel: false
+            options: wordsmith.modelOptions
+            value: wordsmith.activeModel
+            enabled: !wordsmith.working && wordsmith.modelOptions.length > 0
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            // Guarded because a Dropdown emits changed() while it settles on an
+            // initial value, and an unguarded handler wrote a model into
+            // wordsmith.json on every panel open without anyone choosing one.
+            onChanged: function(v) {
+              if (!root.opened) return
+              if (!v || wordsmith.activeModel === "") return
+              if (v === wordsmith.activeModel) return
+              if (wordsmith.modelOptions.indexOf(v) === -1) return
+              wordsmith.setModel(v)
+            }
+          }
+
+          // Worth stating at the point of switching, not buried in a README:
+          // codex and claude keep the text off the disk; the opencode ones do not.
+          Text {
+            visible: !Model.backendIsEphemeral(wordsmith.backend)
+            width: parent.width
+            text: "opencode records prompts in its own database — Wordsmith deletes the session after each rewrite, with retries."
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
         }
 
         PanelSeparator { foreground: root.foreground }
@@ -342,7 +414,10 @@ Panel {
           visible: root.viewedResult.length > 0
 
           PanelSectionHeader {
-            text: (root.viewIndex === 0 ? "REWRITE" : "EARLIER · " + root.viewedLabel.toUpperCase())
+            text: (root.viewIndex === 0
+                    ? "REWRITE"
+                    : "EARLIER · " + root.viewedLabel.toUpperCase()
+                      + (root.viewedEntry && root.viewedEntry.backendLabel ? " · " + root.viewedEntry.backendLabel : ""))
               + " · " + Model.charCount(root.viewedResult.length)
             foreground: root.foreground
             fontFamily: root.fontFamily
@@ -459,9 +534,10 @@ Panel {
                 required property int index
                 bordered: true
                 selected: root.viewIndex === index
-                text: index === 0 ? "current" : String(modelData.modeLabel || modelData.mode || "?")
-                tooltipText: (modelData.placeholders > 0 ? modelData.placeholders + " placeholder(s) · " : "")
+                text: index === 0 ? "current" : Model.backendLabel(modelData.backend)
+                tooltipText: String(modelData.modeLabel || "") + " · "
                   + Model.charCount(modelData.resultChars)
+                  + (modelData.placeholders > 0 ? " · " + modelData.placeholders + " placeholder(s)" : "")
                 foreground: root.foreground
                 fontFamily: root.fontFamily
                 fontSize: Style.font.caption
@@ -475,8 +551,7 @@ Panel {
 
         Text {
           width: parent.width
-          text: "1–5 pick a mode · c copy · r again · x clear. "
-            + "Text is held in tmpfs and Codex runs with --ephemeral, so nothing is written to disk — but the words do go to OpenAI under your ChatGPT plan."
+          text: "1–5 pick a mode · c copy · r again · x clear. " + Model.privacyNote(wordsmith.backend)
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

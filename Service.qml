@@ -18,12 +18,20 @@ Item {
   readonly property string exe: String(Qt.resolvedUrl("bin/wordsmith")).replace(/^file:\/\//, "")
 
   readonly property string defaultMode: String(setting("defaultMode", "professional"))
-  readonly property string model: String(setting("model", "gpt-5.6-terra"))
+  readonly property string model: String(setting("model", ""))
   readonly property string effort: String(setting("reasoningEffort", "low"))
   readonly property string source: String(setting("source", "auto"))
   readonly property bool autoCopy: setting("autoCopy", true) !== false
   readonly property bool notifyEnabled: setting("notify", true) !== false
   readonly property bool preserveQuoted: setting("preserveQuoted", true) !== false
+  // Deliberately empty fallbacks: an unset setting must fall through to the
+  // script's own default rather than a second copy of it here. shell.json does
+  // not receive the manifest's defaultValue, so a non-empty fallback would
+  // quietly become the effective default and drift.
+  readonly property string defaultBackend: String(setting("backend", "codex"))
+  readonly property string goModel: String(setting("goModel", ""))
+  readonly property string ollamaModel: String(setting("ollamaModel", ""))
+  readonly property string claudeModel: String(setting("claudeModel", ""))
   readonly property int timeoutSec: intSetting("timeoutSec", 90, 15, 300)
   readonly property int maxChars: intSetting("maxChars", 20000, 500, 100000)
 
@@ -39,6 +47,13 @@ Item {
   readonly property int quotedLines: parseInt(String(state.quotedLines || 0), 10) || 0
   readonly property int placeholderCount: parseInt(String(state.placeholders || 0), 10) || 0
   readonly property var history: state.history || []
+  // Resolved by the script, not by the widget: the live toggle in wordsmith.json
+  // outranks the configured default, so the panel must read back what actually
+  // applies rather than assume its own setting won.
+  readonly property string backend: String(state.backend || defaultBackend)
+  readonly property string backendLabel: String(state.backendLabel || Model.backendLabel(backend))
+  readonly property var backends: Model.BACKENDS
+  readonly property string activeModel: String(state.model || "")
   readonly property string storedInstruction: String(state.instruction || "")
 
   readonly property string summary: Model.summary(state)
@@ -60,16 +75,27 @@ Item {
   // Every invocation carries the widget's settings, so shell.json stays
   // authoritative and wordsmith.json is only a fallback for terminal use.
   function flags() {
+    // Note there is no "--model" here. That flag is the explicit override for
+    // terminal use and would apply to whichever backend is active, so passing
+    // the codex model through it made Claude and opencode ask their providers
+    // for "gpt-5.6-terra". The widget's values are defaults, and go through the
+    // --default-model-* flags below.
     return [
-      "--model", model,
       "--effort", effort,
       "--source", source,
       "--timeout", String(timeoutSec),
       "--max-chars", String(maxChars),
       autoCopy ? "--copy" : "--no-copy",
       notifyEnabled ? "--notify" : "--no-notify",
-      preserveQuoted ? "--quoted" : "--no-quoted"
-    ]
+      preserveQuoted ? "--quoted" : "--no-quoted",
+      "--default-backend", defaultBackend
+    ].concat(
+      // Omitted when unset, so `wordsmith`'s defaults apply untouched.
+      model.length        ? ["--default-model-codex",  model]        : [],
+      goModel.length      ? ["--default-model-go",     goModel]      : [],
+      ollamaModel.length  ? ["--default-model-ollama", ollamaModel]  : [],
+      claudeModel.length  ? ["--default-model-claude", claudeModel]  : []
+    )
   }
 
   function refresh() {
@@ -93,6 +119,13 @@ Item {
   }
 
   function copy() { act(["copy"]) }
+  function setBackend(id) { act(["backend", String(id)]) }
+  function setModel(name) { act(["model", String(name)]) }
+
+  // The offered models come from the script rather than a second copy of the
+  // list in QML, so there is one place to edit when a provider adds a model.
+  property var modelOptions: []
+  function refreshModels() { if (!modelsProcess.running) modelsProcess.running = true }
   function copyIndex(i) { act(["copy", "--index", String(i)]) }
   function cancel() { act(["cancel"]) }
   function clear() { act(["clear"]) }
@@ -113,6 +146,17 @@ Item {
     running: true
     triggeredOnStart: true
     onTriggered: root.refresh()
+  }
+
+  Process {
+    id: modelsProcess
+    running: false
+    command: [root.exe, "models"].concat(root.flags())
+    stdout: StdioCollector { id: modelsStdout; waitForEnd: true }
+    onExited: function(exitCode) {
+      var parsed = Model.parse(modelsStdout.text)
+      if (parsed && parsed.options) root.modelOptions = parsed.options
+    }
   }
 
   Process {
@@ -150,6 +194,7 @@ Item {
       if (exitCode !== 0)
         root.lastError = String(actionStderr.text || "").trim() || "wordsmith command failed"
       root.refresh()
+      root.refreshModels()
     }
   }
 

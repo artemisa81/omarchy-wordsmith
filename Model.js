@@ -209,3 +209,49 @@ function quotedNote(state) {
   if (!isFinite(n) || n <= 0) return ""
   return n + " quoted line" + (n === 1 ? "" : "s") + " left untouched"
 }
+
+// -------------------------------------------------------------- backends -----
+
+// All three are subscriptions the user already pays for, not metered API keys.
+// The privacy note is not cosmetic: codex runs --ephemeral and writes nothing,
+// while opencode records every prompt in its own database — wordsmith deletes
+// the session afterwards, but there is a window, and that is worth saying out
+// loud next to the button that switches to it.
+var BACKENDS = [
+  { id: "codex",        label: "ChatGPT",      hint: "codex — ephemeral, read-only sandbox, nothing written to disk" },
+  { id: "opencode-go",  label: "OpenCode Go",  hint: "via opencode — prompt hits its database, session deleted after" },
+  { id: "ollama-cloud", label: "Ollama Cloud", hint: "via opencode — prompt hits its database, session deleted after" },
+  { id: "claude",       label: "Claude",       hint: "claude CLI directly, not through opencode — no transcript kept" }
+]
+
+function backendLabel(id) {
+  for (var i = 0; i < BACKENDS.length; i++)
+    if (BACKENDS[i].id === id) return BACKENDS[i].label
+  return id || ""
+}
+
+// Only codex keeps the text off disk entirely; the others need the session
+// cleanup to have run.
+function backendIsEphemeral(id) {
+  var v = String(id)
+  return v === "codex" || v === "claude"
+}
+
+// The footer used to hardcode codex's guarantees. With four backends the
+// honest sentence differs per backend, and this is the one place the user reads
+// before pasting, so it has to track what actually ran.
+function privacyNote(backend) {
+  var base = "Text is held in tmpfs, never on disk. "
+  switch (String(backend)) {
+    case "codex":
+      return base + "Codex runs with --ephemeral, so it keeps no transcript — but the words go to OpenAI under your ChatGPT plan."
+    case "claude":
+      return base + "claude -p keeps no transcript — but the words go to Anthropic under your Claude plan."
+    case "opencode-go":
+      return base + "opencode records the prompt in its own database and Wordsmith deletes the session afterwards — the words go to OpenCode Go."
+    case "ollama-cloud":
+      return base + "opencode records the prompt in its own database and Wordsmith deletes the session afterwards — the words go to Ollama Cloud."
+    default:
+      return base + "The words leave this machine to whichever backend is selected."
+  }
+}
