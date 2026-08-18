@@ -134,7 +134,7 @@
         "key": "source",
         "type": "enum",
         "label": "Where to read the text from",
-        "description": "Auto takes your drag-selection when there is one and falls back to the clipboard. Choose clipboard if you would rather always press Ctrl+C first.",
+        "description": "Auto takes your drag-selection, but prefers the clipboard when it holds the same text more completely — a drag that stopped short no longer costs you the start of the mail. Choose clipboard if you would rather always press Ctrl+C first.",
         "options": [
           "auto",
           "primary",

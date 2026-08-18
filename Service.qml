@@ -46,6 +46,8 @@ Item {
   readonly property bool hasResult: result.trim().length > 0
   readonly property int quotedLines: parseInt(String(state.quotedLines || 0), 10) || 0
   readonly property int placeholderCount: parseInt(String(state.placeholders || 0), 10) || 0
+  // Set when the captured text starts mid-sentence — see capture_note in bin/wordsmith.
+  readonly property string captureNote: String(state.captureNote || "")
   readonly property var history: state.history || []
   // The SELECTION — the persisted toggle, resolved by the script from
   // wordsmith.json at every state read. Distinct from state.backend, which is

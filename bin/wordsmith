@@ -419,7 +419,7 @@ empty_state() {
     '{status:"idle", mode:"", modeLabel:"", source:"", original:"", result:"",
       error:"", chars:0, resultChars:0, elapsedMs:0, model:$model, startedAt:0,
       instruction:"", quoted:"", quotedLines:0, placeholders:0, history:[],
-      backend:"", backendLabel:""}'
+      backend:"", backendLabel:"", captureNote:""}'
 }
 
 read_state() { [[ -r "$STATE" ]] && cat "$STATE" || empty_state; }
@@ -487,6 +487,24 @@ notify() { # notify <urgency> <title> <body>
 # tool is built around — select the paragraph, press the key. CLIPBOARD is the
 # fallback for people who reflexively hit Ctrl+C first, and for apps that never
 # export PRIMARY.
+#
+# "auto" used to mean "PRIMARY whenever it is non-empty", and that quietly ate
+# text. PRIMARY only ever tracks the mouse drag: extending the selection with
+# Shift, Ctrl+A, a triple-click or the browser's own selection snapping all land
+# in CLIPBOARD on Ctrl+C while PRIMARY keeps the raw drag extent. The rewrite
+# then ran on a fragment — the observed case lost the greeting's name and handed
+# the model a paragraph starting on a bare comma.
+#
+# So when the two are in a superset relationship, take the longer one: it is the
+# same selection, captured more completely. When they disagree outright the
+# clipboard is unrelated content from somewhere else, and PRIMARY still wins —
+# select-then-press stays the primary gesture.
+
+# Whitespace-normalised, for comparison only. A drag and a Ctrl+C over the same
+# text routinely differ in line breaks and trailing space; that is not a
+# difference worth acting on.
+norm_ws() { printf '%s' "$1" | tr -s '[:space:]' ' ' | sed -e 's/^ //' -e 's/ $//'; }
+
 grab() {
   local p="" c=""
   case "$SOURCE_PREF" in
@@ -498,8 +516,49 @@ grab() {
       ;;
   esac
 
-  if [[ -n "${p//[[:space:]]/}" ]]; then SELECTED="$p"; SELECTED_SRC="selection"
-  else SELECTED="$c"; SELECTED_SRC="clipboard"; fi
+  local pf="${p//[[:space:]]/}" cf="${c//[[:space:]]/}"
+
+  # Only one of them has anything: no contest.
+  if [[ -z "$pf" ]]; then SELECTED="$c"; SELECTED_SRC="clipboard"; return 0; fi
+  if [[ -z "$cf" ]]; then SELECTED="$p"; SELECTED_SRC="selection"; return 0; fi
+
+  local pn cn
+  pn=$(norm_ws "$p"); cn=$(norm_ws "$c")
+
+  if [[ "$pn" == "$cn" ]]; then
+    # Same text both ways. Prefer PRIMARY so the reported source matches the
+    # gesture the user actually made.
+    SELECTED="$p"; SELECTED_SRC="selection"
+  elif [[ "$cn" == *"$pn"* ]]; then
+    # The drag caught part of what was copied — the truncation case.
+    SELECTED="$c"; SELECTED_SRC="clipboard"
+  elif [[ "$pn" == *"$cn"* ]]; then
+    SELECTED="$p"; SELECTED_SRC="selection"
+  else
+    SELECTED="$p"; SELECTED_SRC="selection"
+  fi
+}
+
+# A capture that begins on orphaned punctuation is a drag that started mid
+# sentence — the exact signature of the bug above, and the one case worth
+# flagging outright. Everything softer (a lowercase opening word, a missing full
+# stop at the end) fires constantly on real drafts, and a warning that cries
+# wolf gets ignored, so it is deliberately left out.
+capture_note() { # capture_note <text>
+  local first
+  first=$(printf '%s' "$1" | grep -m1 -v '^[[:space:]]*$' || true)
+  first="${first#"${first%%[![:space:]]*}"}"
+  [[ -n "$first" ]] || return 0
+  # A plain first-character test, not a regex: ']' inside an ERE bracket class
+  # closes it early, which silently made an earlier version match nothing.
+  local c="${first:0:1}"
+  # Closing punctuation only. Quote marks are excluded on purpose: a draft that
+  # opens by quoting someone starts on " or ’ or » perfectly legitimately, and
+  # this warning is only worth having while it never cries wolf.
+  local orphans=',;:.!?)]}'
+  if [[ "$orphans" == *"$c"* ]]; then
+    printf 'The captured text starts mid-sentence — the selection may be cut short.'
+  fi
 }
 
 count_placeholders() {
@@ -642,6 +701,10 @@ cmd_run() {
     read_state; return 0
   fi
 
+  # Flagged, not corrected: a selection that starts mid-sentence is still worth
+  # rewriting, the user just needs to know the capture may be short.
+  local capture_note; capture_note=$(capture_note "$SELECTED")
+
   local full; full=$(mktemp "$STATE_DIR/in.XXXXXX")
   printf '%s' "$SELECTED" > "$full"
 
@@ -668,7 +731,7 @@ cmd_run() {
   jq -nc --arg mode "$mode" --arg label "$label" --arg src "$SELECTED_SRC" \
         --arg original "$SELECTED" --arg model "$(backend_model "$backend")" --arg instruction "$INSTRUCTION" \
         --arg backend "$backend" --arg backendLabel "$(backend_label "$backend")" \
-        --arg quoted "$tail_text" \
+        --arg quoted "$tail_text" --arg captureNote "$capture_note" \
         --argjson chars "${#SELECTED}" --argjson started "$started" \
         --argjson quotedLines "${quoted_lines:-0}" \
         --argjson history "$(read_state | jq -c '.history // []')" \
@@ -676,7 +739,7 @@ cmd_run() {
       result:"", error:"", chars:$chars, resultChars:0, elapsedMs:0, model:$model,
       startedAt:$started, instruction:$instruction, quoted:$quoted,
       quotedLines:$quotedLines, placeholders:0, history:$history,
-      backend:$backend, backendLabel:$backendLabel}' | write_state
+      backend:$backend, backendLabel:$backendLabel, captureNote:$captureNote}' | write_state
 
   worker "$mode" "$label" "$started" "$headfile" "$tail_text" "$backend" &
   echo $! > "$PIDFILE"

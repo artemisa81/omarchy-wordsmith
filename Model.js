@@ -188,8 +188,74 @@ function droppedFacts(original, result) {
   return missing
 }
 
+// Names were originally left out of the check on the grounds that a rewrite
+// rephrases them legitimately all the time. That is true of *titles* — "Alex
+// signed off" becoming "Alex approved" keeps the name — but not of the name
+// itself: a proper noun that leaves the text entirely has taken a fact with it.
+//
+// So the test is presence, not phrasing: every capitalised token that is not at
+// a sentence start, minus a stoplist of words that are simply capitalised
+// English. Sentence-initial words are skipped because there is no way to tell
+// "Thanks" the greeting from "Thanks" the surname without a dictionary.
+var NAME_STOP = (
+  "I A An The We You He She It They Them Their This That These Those But And Or If So As " +
+  "To In On At By For Of Is Am Are Be Was Were My Me Our Your His Her Its Not No Yes " +
+  "Please Thanks Thank Regards Kind Best Hi Hello Dear Also However When While Then " +
+  "There Here Can Could Would Should Will Shall May Might Must Let Do Does Did Have Has Had"
+).split(" ")
+
+function nameTokens(text) {
+  var s = String(text || "")
+  // Capitalised run, with the character that precedes it captured so sentence
+  // starts can be told apart from mid-sentence proper nouns.
+  // Explicit letter ranges rather than \p{L} and the /u flag: this has to run in
+  // QML's JS engine, and an unsupported escape there fails at parse time.
+  var W = "[A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u017F'\u2019-]"
+  var U = "[A-Z\u00C0-\u00D6\u00D8-\u00DE]"
+  var re = new RegExp("([^\\s]?)\\s*\\b(" + U + W + "+(?:\\s+" + U + W + "+)*)", "g")
+  var out = []
+  var m
+  while ((m = re.exec(s)) !== null) {
+    var prev = m[1]
+    var tok = m[2]
+    // Start of text, or start of a sentence or line: ambiguous, so skipped.
+    if (prev === "" || prev === "." || prev === "!" || prev === "?" || prev === "\n") {
+      // A multi-word run that merely *begins* a sentence still carries a name
+      // in its later words — keep those.
+      var parts = tok.split(/\s+/)
+      if (parts.length < 2) continue
+      tok = parts.slice(1).join(" ")
+    }
+    if (NAME_STOP.indexOf(tok) !== -1) continue
+    if (tok.length < 2) continue
+    if (out.indexOf(tok) === -1) out.push(tok)
+  }
+  return out
+}
+
+function droppedNames(original, result) {
+  if (!original || !result) return []
+  var toks = nameTokens(original)
+  var res = String(result)
+  var missing = []
+  for (var i = 0; i < toks.length; i++) {
+    var t = toks[i]
+    if (res.indexOf(t) !== -1) continue
+    // "Jordan Ellis" -> "Jordan" is a rephrase, not a drop. Only a name whose
+    // every word has gone counts.
+    var parts = t.split(/\s+/)
+    var anyKept = false
+    for (var j = 0; j < parts.length; j++) {
+      if (parts[j].length >= 2 && res.indexOf(parts[j]) !== -1) anyKept = true
+    }
+    if (anyKept) continue
+    missing.push(t)
+  }
+  return missing
+}
+
 function droppedNote(original, result) {
-  var m = droppedFacts(original, result)
+  var m = droppedFacts(original, result).concat(droppedNames(original, result))
   if (m.length === 0) return ""
   var shown = m.slice(0, 4).join(", ")
   return "Not found in the rewrite: " + shown + (m.length > 4 ? " (+" + (m.length - 4) + " more)" : "")

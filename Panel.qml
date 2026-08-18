@@ -447,6 +447,19 @@ Panel {
             wrapMode: Text.WordWrap
           }
 
+          // Warns about the *input*, not the rewrite: if the selection arrived
+          // truncated, the dropped-facts check below cannot see it, because it
+          // only ever compares the result against what was captured.
+          Text {
+            visible: root.viewIndex === 0 && wordsmith.captureNote !== ""
+            width: parent.width
+            text: "󰀦  " + wordsmith.captureNote
+            color: root.urgent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
           Text {
             visible: root.droppedNote !== ""
             width: parent.width

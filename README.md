@@ -133,6 +133,19 @@ falls back to the clipboard. Set **Where to read the text from** to `clipboard` 
 you would rather always copy explicitly. The panel says which one it used, so a
 rewrite of the wrong text is self-explaining.
 
+`auto` does not simply prefer PRIMARY. PRIMARY only ever tracks the mouse drag,
+so extending a selection with `Shift`, `Ctrl+A`, a triple-click, or the browser's
+own selection snapping lands in the clipboard on `Ctrl+C` while PRIMARY keeps the
+raw drag extent — and the rewrite then silently ran on a fragment, typically
+losing the greeting's name off the front. So when the two are in a superset
+relationship `auto` takes the longer one: same selection, captured more
+completely. When they disagree outright, the clipboard is unrelated content from
+somewhere else and the drag still wins.
+
+If the text does arrive cut short anyway — no fuller copy to recover it from —
+the panel says so above the result rather than letting a half sentence through
+unremarked.
+
 ## Privacy
 
 Work email is the main input here, so the handling is deliberate:
@@ -287,6 +300,12 @@ you already fixed.
 
 **"Nothing selected"** — the app you are in may not export PRIMARY. Press
 `Ctrl+C` first, or set the source to `clipboard`.
+
+**Names or figures missing from the rewrite** — check the *original* shown in the
+panel first. If they are absent there too, the capture was short rather than the
+rewrite lossy; see "Where the text comes from". If they are present in the
+original but gone from the result, the panel's "Not found in the rewrite" line
+lists them.
 
 **Rewrites fail** — check the sign-in with `codex login status`. Everything the
 script learns about a failure ends up in `wordsmith state`'s `error` field.
