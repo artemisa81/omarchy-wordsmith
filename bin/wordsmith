@@ -69,19 +69,19 @@ DEF_MODEL_CLAUDE=""
 _rest=()
 while (( $# )); do
   case "$1" in
-    --model)     MODEL_OVERRIDE="${2:-}"; shift 2 ;;
+    --model)     MODEL_OVERRIDE="${2:-}"; shift 2 || die "missing value for $1" ;;
     --model=*)   MODEL_OVERRIDE="${1#*=}"; shift ;;
-    --effort)    EFFORT="${2:-$EFFORT}"; shift 2 ;;
+    --effort)    EFFORT="${2:-$EFFORT}"; shift 2 || die "missing value for $1" ;;
     --effort=*)  EFFORT="${1#*=}"; shift ;;
-    --timeout)   TIMEOUT="${2:-$TIMEOUT}"; shift 2 ;;
+    --timeout)   TIMEOUT="${2:-$TIMEOUT}"; shift 2 || die "missing value for $1" ;;
     --timeout=*) TIMEOUT="${1#*=}"; shift ;;
-    --max-chars)   MAXCHARS="${2:-$MAXCHARS}"; shift 2 ;;
+    --max-chars)   MAXCHARS="${2:-$MAXCHARS}"; shift 2 || die "missing value for $1" ;;
     --max-chars=*) MAXCHARS="${1#*=}"; shift ;;
-    --source)    SOURCE_PREF="${2:-$SOURCE_PREF}"; shift 2 ;;
+    --source)    SOURCE_PREF="${2:-$SOURCE_PREF}"; shift 2 || die "missing value for $1" ;;
     --source=*)  SOURCE_PREF="${1#*=}"; shift ;;
-    --instruction)   INSTRUCTION="${2:-}"; shift 2 ;;
+    --instruction)   INSTRUCTION="${2:-}"; shift 2 || die "missing value for $1" ;;
     --instruction=*) INSTRUCTION="${1#*=}"; shift ;;
-    --index)     COPY_INDEX="${2:-0}"; shift 2 ;;
+    --index)     COPY_INDEX="${2:-0}"; shift 2 || die "missing value for $1" ;;
     --index=*)   COPY_INDEX="${1#*=}"; shift ;;
     --copy)      AUTOCOPY=true; shift ;;
     --no-copy)   AUTOCOPY=false; shift ;;
@@ -89,14 +89,14 @@ while (( $# )); do
     --no-notify) NOTIFY=false; shift ;;
     --quoted)    PRESERVE_QUOTED=true; shift ;;
     --no-quoted) PRESERVE_QUOTED=false; shift ;;
-    --backend)   BACKEND="${2:-}"; shift 2 ;;
+    --backend)   BACKEND="${2:-}"; shift 2 || die "missing value for $1" ;;
     --backend=*) BACKEND="${1#*=}"; shift ;;
-    --default-backend)   DEFAULT_BACKEND_ARG="${2:-}"; shift 2 ;;
+    --default-backend)   DEFAULT_BACKEND_ARG="${2:-}"; shift 2 || die "missing value for $1" ;;
     --default-backend=*) DEFAULT_BACKEND_ARG="${1#*=}"; shift ;;
-    --default-model-codex)  DEF_MODEL_CODEX="${2:-}"; shift 2 ;;
-    --default-model-go)     DEF_MODEL_GO="${2:-}"; shift 2 ;;
-    --default-model-ollama) DEF_MODEL_OLLAMA="${2:-}"; shift 2 ;;
-    --default-model-claude) DEF_MODEL_CLAUDE="${2:-}"; shift 2 ;;
+    --default-model-codex)  DEF_MODEL_CODEX="${2:-}"; shift 2 || die "missing value for $1" ;;
+    --default-model-go)     DEF_MODEL_GO="${2:-}"; shift 2 || die "missing value for $1" ;;
+    --default-model-ollama) DEF_MODEL_OLLAMA="${2:-}"; shift 2 || die "missing value for $1" ;;
+    --default-model-claude) DEF_MODEL_CLAUDE="${2:-}"; shift 2 || die "missing value for $1" ;;
     *) _rest+=("$1"); shift ;;
   esac
 done
@@ -678,7 +678,7 @@ cmd_run() {
   local from_stdin=false
   while (( $# )); do
     case "$1" in
-      --mode) mode="${2:-}"; shift 2 ;;
+      --mode) mode="${2:-}"; shift 2 || die "missing value for $1" ;;
       --mode=*) mode="${1#*=}"; shift ;;
       --stdin) from_stdin=true; shift ;;
       *) die "unknown argument: $1" ;;
