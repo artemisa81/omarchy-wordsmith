@@ -505,14 +505,29 @@ notify() { # notify <urgency> <title> <body>
 # difference worth acting on.
 norm_ws() { printf '%s' "$1" | tr -s '[:space:]' ' ' | sed -e 's/^ //' -e 's/ $//'; }
 
+# A PRIMARY transfer from a Mozilla app on Wayland (Thunderbird, Firefox)
+# intermittently drops the first character or two — seen at the compositor
+# level, and the panel would silently rewrite a fragment starting mid-word.
+# A truncated read can only lose characters, never gain them, so sampling the
+# same selection a few times and keeping the longest read converges on the
+# full text without ever inventing any.
+best_read() { # best_read <wl-paste args...>
+  local best="" s
+  for _ in 1 2 3; do
+    s=$(wl-paste --no-newline -t text/plain "$@" 2>/dev/null) || continue
+    [[ ${#s} -gt ${#best} ]] && best=$s
+  done
+  printf '%s' "$best"
+}
+
 grab() {
   local p="" c=""
   case "$SOURCE_PREF" in
-    primary)   p=$(wl-paste --primary --no-newline -t text/plain 2>/dev/null) ;;
-    clipboard) c=$(wl-paste --no-newline -t text/plain 2>/dev/null) ;;
+    primary)   p=$(best_read --primary) ;;
+    clipboard) c=$(best_read) ;;
     *)
-      p=$(wl-paste --primary --no-newline -t text/plain 2>/dev/null)
-      c=$(wl-paste --no-newline -t text/plain 2>/dev/null)
+      p=$(best_read --primary)
+      c=$(best_read)
       ;;
   esac
 
@@ -558,6 +573,15 @@ capture_note() { # capture_note <text>
   local orphans=',;:.!?)]}'
   if [[ "$orphans" == *"$c"* ]]; then
     printf 'The captured text starts mid-sentence — the selection may be cut short.'
+    return 0
+  fi
+  # A multi-paragraph capture opening on a lowercase letter is a drag that
+  # started inside the first word — the observed Thunderbird/Wayland case. A
+  # one-liner may legitimately start lowercase, so this only fires on 2+ lines.
+  local lines
+  lines=$(printf '%s' "$1" | grep -cv '^[[:space:]]*$' || true)
+  if (( lines >= 2 )) && [[ "$c" =~ [a-z] ]]; then
+    printf 'The captured text starts mid-word — the selection may be cut short at the start.'
   fi
 }
 

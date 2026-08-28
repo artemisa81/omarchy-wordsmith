@@ -142,6 +142,15 @@ relationship `auto` takes the longer one: same selection, captured more
 completely. When they disagree outright, the clipboard is unrelated content from
 somewhere else and the drag still wins.
 
+A PRIMARY read from a Mozilla app on Wayland (Thunderbird, Firefox) can
+intermittently drop the first character or two during the transfer itself —
+reported at the compositor level, and indistinguishable from a drag that
+started mid-word. So each buffer is sampled a few times and the longest read
+wins: a truncated read can only lose characters, never gain them, so the
+fullest sample is the true selection. When every sample still comes back
+short and the capture opens on a lowercase word across multiple paragraphs,
+the panel says so above the result rather than rewriting a fragment.
+
 If the text does arrive cut short anyway — no fuller copy to recover it from —
 the panel says so above the result rather than letting a half sentence through
 unremarked.
