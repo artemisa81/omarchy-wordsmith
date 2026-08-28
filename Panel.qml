@@ -100,6 +100,7 @@ Panel {
   onOpenedChanged: if (opened) {
     wordsmith.refresh()
     wordsmith.refreshModels()
+    wordsmith.refreshInstructions()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
@@ -359,17 +360,72 @@ Panel {
 
           // The four fixed modes cannot express "keep the bullets but make it
           // formal", which is most of what you actually want on a given day.
-          TextField {
-            id: instructionField
+          Row {
             width: parent.width
-            placeholderText: "5  Your own instruction, then Enter"
-            foreground: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            enabled: !wordsmith.working
-            Component.onCompleted: text = root.customInstruction
-            onTextChanged: root.customInstruction = text
-            onAccepted: if (text.trim().length > 0) wordsmith.run("custom", text)
+            spacing: Style.space(6)
+
+            TextField {
+              id: instructionField
+              width: parent.width - saveButton.width - parent.spacing
+              placeholderText: "5  Your own instruction, then Enter"
+              foreground: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              enabled: !wordsmith.working
+              Component.onCompleted: text = root.customInstruction
+              onTextChanged: root.customInstruction = text
+              onAccepted: if (text.trim().length > 0) wordsmith.run("custom", text)
+            }
+
+            Button {
+              id: saveButton
+              text: "󰅃  Save"
+              tooltipText: "Keep this instruction on the list below — the ones you use every week, typed once"
+              bordered: true
+              enabled: !wordsmith.working && root.customInstruction.trim().length > 0
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.bodySmall
+              onClicked: wordsmith.saveInstruction(root.customInstruction)
+            }
+          }
+
+          // Saved presets, persisted by the script in wordsmith.json. Click
+          // runs one straight away; right-click deletes it.
+          Column {
+            width: parent.width
+            spacing: Style.space(4)
+            visible: wordsmith.savedInstructions.length > 0
+
+            PanelSectionHeader {
+              text: "SAVED INSTRUCTIONS"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Repeater {
+              model: wordsmith.savedInstructions
+
+              Button {
+                required property var modelData
+                required property int index
+                width: column.width
+                leftAlign: true
+                bordered: true
+                text: Model.preview(modelData, 80)
+                tooltipText: modelData + "\nclick: run it now · right-click: delete"
+                enabled: !wordsmith.working
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                fontSize: Style.font.caption
+                onClicked: {
+                  root.customInstruction = modelData
+                  instructionField.text = modelData
+                  wordsmith.run("custom", modelData)
+                }
+                onRightClicked: wordsmith.removeInstruction(index)
+              }
+            }
           }
         }
 

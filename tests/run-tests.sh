@@ -257,6 +257,21 @@ printf 'l' | env OLLAMA_MODE=empty $WS run --stdin >/dev/null 2>&1
 wait_done error
 assert "empty local answer is a failure" "$ST" "error"
 
+echo "== saved custom instructions =="
+assert "empty list to start" "$($WS instructions)" "[]"
+$WS instruction-add "three polite bullet points, under 40 words" >/dev/null
+$WS instruction-add "make it formal, keep the bullets" >/dev/null
+$WS instruction-add "three polite bullet points, under 40 words" >/dev/null
+assert "list keeps both, deduped" "$($WS instructions | jq '. | length')" "2"
+assert "re-adding moves it to the front" "$($WS instructions | jq -r '.[0]')" "three polite bullet points, under 40 words"
+$WS instruction-remove 0 >/dev/null
+assert "remove by index" "$($WS instructions | jq -r '.[0]')" "make it formal, keep the bullets"
+$WS instruction-remove 99 >/dev/null 2>&1 && ok "out-of-range remove is a no-op" || bad "out-of-range remove" "died"
+$WS instruction-add "   " 2>&1 | grep -q "empty instruction" && ok "blank add rejected" || bad "blank add" "accepted"
+for i in 1 2 3 4 5 6 7 8 9 10; do $WS instruction-add "preset $i" >/dev/null; done
+assert "capped at eight" "$($WS instructions | jq '. | length')" "8"
+assert "cap keeps the newest" "$($WS instructions | jq -r '.[0]')" "preset 10"
+
 echo "== unicode, clear, JSON shapes =="
 printf 'สวัสดี Héllo — café' | $WS run --stdin >/dev/null 2>&1
 wait_done done

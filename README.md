@@ -61,6 +61,12 @@ finished one, `Esc` closes.
 | **Firm follow-up** | Explicit ask, stated deadline, consequence of delay — courteous but direct. |
 | **Custom** | Your own instruction, e.g. "three polite bullet points, under 40 words" or "keep the bullets but make it formal". Type it in the box and press Enter. |
 
+The instruction you type every week is worth typing once: **Save** keeps it on
+a **SAVED INSTRUCTIONS** list under the box — click one to run it, right-click
+to delete. The list lives in `~/.config/omarchy/wordsmith.json` next to the
+backend choice, so it survives reboots, dedupes, and caps at eight because a
+list you have to scroll is a list you stop using.
+
 Every mode is told to preserve facts, names, numbers, dates, links and
 commitments exactly, to keep the original language, and to keep whatever
 greeting and sign-off you already wrote.
@@ -294,6 +300,10 @@ bin/wordsmith state                            # current job as JSON
 bin/wordsmith copy [--index N]                 # result to clipboard; N walks history
 bin/wordsmith cancel                           # abort a running job
 bin/wordsmith clear                            # wipe held text from tmpfs
+
+bin/wordsmith instructions                     # saved custom instructions as JSON
+bin/wordsmith instruction-add "three polite bullet points, under 40 words"
+bin/wordsmith instruction-remove 0             # delete the first saved one
 ```
 
 `run` returns immediately and forks the model call, which is what keeps the bar

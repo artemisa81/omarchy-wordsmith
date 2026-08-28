@@ -137,6 +137,17 @@ Item {
   function setBackend(id) { act(["backend", String(id)]) }
   function setModel(name) { act(["model", String(name)]) }
 
+  // Saved custom instructions: persisted by the script in wordsmith.json,
+  // fetched here only for rendering the panel's list.
+  property var savedInstructions: []
+
+  function refreshInstructions() {
+    if (instructionsProcess.running) return
+    instructionsProcess.running = true
+  }
+  function saveInstruction(text) { act(["instruction-add", String(text)]) }
+  function removeInstruction(i) { act(["instruction-remove", String(i)]) }
+
   // The offered models come from the script rather than a second copy of the
   // list in QML, so there is one place to edit when a provider adds a model.
   property var modelOptions: []
@@ -193,8 +204,8 @@ Item {
     onExited: function(exitCode) {
       var parsed = Model.parse(modelsStdout.text)
       // Accept only a list that belongs to the backend on screen. Showing a
-      // stale list is worse than briefly showing the previous one, because the
-      // dropdown would then offer models the active backend cannot serve.
+      // stale list is worse than briefly showing the previous one, because
+      // the dropdown would then offer models the active backend cannot serve.
       if (parsed && parsed.options && String(parsed.backend) === root.backend)
         root.modelOptions = parsed.options
 
@@ -202,6 +213,19 @@ Item {
         root._modelsPending = false
         Qt.callLater(root.refreshModels)
       }
+    }
+  }
+
+  Process {
+    id: instructionsProcess
+    running: false
+    command: [root.exe, "instructions"].concat(root.flags())
+    stdout: StdioCollector { id: instructionsStdout; waitForEnd: true }
+    onExited: function(exitCode) {
+      var parsed = Model.parse(instructionsStdout.text)
+      if (parsed && parsed instanceof Array) root.savedInstructions = parsed
+    }
+  }
     }
   }
 
@@ -241,6 +265,7 @@ Item {
         root.lastError = String(actionStderr.text || "").trim() || "wordsmith command failed"
       root.refresh()
       root.refreshModels()
+      root.refreshInstructions()
       if (root._queued) {
         var next = root._queued
         root._queued = null

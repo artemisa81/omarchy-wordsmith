@@ -31,6 +31,7 @@ DEFAULT_OLLAMA_MODEL="ollama-cloud/glm-5.2"
 DEFAULT_OLLAMA_LOCAL_MODEL="qwen3"
 DEFAULT_CLAUDE_MODEL="claude-opus-4-8"
 HISTORY_MAX=3
+INSTRUCTION_MAX=8
 
 umask 077
 mkdir -p "$STATE_DIR"
@@ -381,6 +382,43 @@ extract_error() {
   esac
   [[ -n "${msg//[[:space:]]/}" ]] || msg="$(backend_label "$backend") exited $rc without output."
   printf '%s' "$msg"
+}
+
+# ------------------------------------------------------- custom presets ------
+
+# The Custom mode's real power is an instruction you have thought about once
+# and want forever ("three polite bullet points, under 40 words"). Typed into
+# a box it evaporated with the panel; these live in wordsmith.json next to the
+# backend choice — the same deliberate exception to tmpfs, and for the same
+# reason: a preference is not work product. Most recent first, deduped, capped,
+# because a list you have to scroll is a list you stop using.
+
+read_instructions() {
+  local cur='{}'; [[ -r "$CFG" ]] && cur=$(cat "$CFG")
+  printf '%s' "$cur" | jq -c '.customInstructions // []'
+}
+
+cmd_instructions() { read_instructions; echo; }
+
+cmd_instruction_add() { # instruction-add <text>
+  local text="${1:-}"
+  [[ -n "${text//[[:space:]]/}" ]] || die "empty instruction"
+  mkdir -p "$CFG_DIR"
+  local cur='{}'; [[ -r "$CFG" ]] && cur=$(cat "$CFG")
+  printf '%s' "$cur" | jq -c --arg t "$text" --argjson max "$INSTRUCTION_MAX" \
+    '.customInstructions = (([$t] + ((.customInstructions // []) | map(select(. != $t)))) | .[0:$max])' \
+    > "$CFG.tmp" && mv -f "$CFG.tmp" "$CFG"
+  read_instructions; echo
+}
+
+cmd_instruction_remove() { # instruction-remove <index>
+  local i="${1:-}"
+  [[ "$i" =~ ^[0-9]+$ ]] || die "bad index: $i"
+  local cur='{}'; [[ -r "$CFG" ]] && cur=$(cat "$CFG")
+  printf '%s' "$cur" | jq -c --argjson i "$i" \
+    '.customInstructions = ((.customInstructions // []) | del(.[$i]))' \
+    > "$CFG.tmp" && mv -f "$CFG.tmp" "$CFG"
+  read_instructions; echo
 }
 
 # ----------------------------------------------------------------- modes -----
@@ -860,6 +898,9 @@ case "${1:-state}" in
   copy)   cmd_copy ;;
   cancel) cmd_cancel ;;
   clear)  cmd_clear ;;
+  instructions)      cmd_instructions ;;
+  instruction-add)   shift; cmd_instruction_add "$@" ;;
+  instruction-remove) shift; cmd_instruction_remove "${1:-}" ;;
   -h|--help|help)
     cat <<'USAGE'
 wordsmith — rewrite the selected text with Codex, on your ChatGPT plan.
@@ -870,6 +911,10 @@ wordsmith — rewrite the selected text with Codex, on your ChatGPT plan.
   wordsmith copy [--index N]              result to clipboard (N indexes history)
   wordsmith cancel                        abort the running job
   wordsmith clear                         wipe stored text from tmpfs
+
+  wordsmith instructions                  saved custom instructions as JSON
+  wordsmith instruction-add TEXT          save one (deduped, newest first, max 8)
+  wordsmith instruction-remove N          delete one by index
 
   wordsmith backend [ID]                  show or switch backend
   wordsmith backends                      available backends as JSON
