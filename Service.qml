@@ -227,8 +227,6 @@ Item {
       if (parsed && parsed instanceof Array) root.savedInstructions = parsed
     }
   }
-    }
-  }
 
   Process {
     id: stateProcess
