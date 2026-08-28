@@ -31,6 +31,7 @@ Item {
   readonly property string defaultBackend: String(setting("backend", "codex"))
   readonly property string goModel: String(setting("goModel", ""))
   readonly property string ollamaModel: String(setting("ollamaModel", ""))
+  readonly property string ollamaLocalModel: String(setting("ollamaLocalModel", ""))
   readonly property string claudeModel: String(setting("claudeModel", ""))
   readonly property int timeoutSec: intSetting("timeoutSec", 90, 15, 300)
   readonly property int maxChars: intSetting("maxChars", 20000, 500, 100000)
@@ -107,6 +108,7 @@ Item {
       model.length        ? ["--default-model-codex",  model]        : [],
       goModel.length      ? ["--default-model-go",     goModel]      : [],
       ollamaModel.length  ? ["--default-model-ollama", ollamaModel]  : [],
+      ollamaLocalModel.length ? ["--default-model-ollama-local", ollamaLocalModel] : [],
       claudeModel.length  ? ["--default-model-claude", claudeModel]  : []
     )
   }

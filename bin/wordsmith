@@ -28,6 +28,7 @@ DEFAULT_SOURCE="auto"
 DEFAULT_BACKEND="codex"
 DEFAULT_GO_MODEL="opencode-go/deepseek-v4-flash"
 DEFAULT_OLLAMA_MODEL="ollama-cloud/glm-5.2"
+DEFAULT_OLLAMA_LOCAL_MODEL="qwen3"
 DEFAULT_CLAUDE_MODEL="claude-opus-4-8"
 HISTORY_MAX=3
 
@@ -61,6 +62,7 @@ MODEL_OVERRIDE=""      # explicit --model, for terminal use
 DEF_MODEL_CODEX=""     # the widget's configured defaults
 DEF_MODEL_GO=""
 DEF_MODEL_OLLAMA=""
+DEF_MODEL_OLLAMA_LOCAL=""
 DEF_MODEL_CLAUDE=""
 
 # Settings flags are accepted on any subcommand and win over wordsmith.json.
@@ -96,6 +98,7 @@ while (( $# )); do
     --default-model-codex)  DEF_MODEL_CODEX="${2:-}"; shift 2 || die "missing value for $1" ;;
     --default-model-go)     DEF_MODEL_GO="${2:-}"; shift 2 || die "missing value for $1" ;;
     --default-model-ollama) DEF_MODEL_OLLAMA="${2:-}"; shift 2 || die "missing value for $1" ;;
+    --default-model-ollama-local) DEF_MODEL_OLLAMA_LOCAL="${2:-}"; shift 2 || die "missing value for $1" ;;
     --default-model-claude) DEF_MODEL_CLAUDE="${2:-}"; shift 2 || die "missing value for $1" ;;
     *) _rest+=("$1"); shift ;;
   esac
@@ -109,22 +112,26 @@ set -- ${_rest+"${_rest[@]}"}
 
 # --------------------------------------------------------------- backends ----
 
-# Three ways to reach a model, all of them subscriptions the user already pays
-# for rather than metered API keys:
+# Five ways to reach a model — four subscriptions the user already pays for
+# rather than metered API keys, plus a local Ollama daemon for the mail that
+# must not leave the machine at all:
 #
 #   codex        `codex exec`, signed in with auth_mode chatgpt  -> ChatGPT plan
 #   opencode-go  `opencode run -m opencode-go/...`               -> OpenCode Go
 #   ollama-cloud `opencode run -m ollama-cloud/...`              -> Ollama Cloud
+#   ollama-local POST to the Ollama daemon on localhost:11434    -> this machine
+#   claude       `claude -p`, directly — *not* through opencode
 #
-# The last two share one adapter because opencode addresses both the same way;
-# only the provider prefix in the model string differs.
+# The two opencode ones share one adapter because opencode addresses both the
+# same way; only the provider prefix in the model string differs. ollama-local
+# is a plain curl, so it needs no CLI at all — only a running daemon.
 #
 # Resolution order is deliberate: an explicit --backend (terminal use) beats the
 # live toggle in wordsmith.json, which beats the widget's configured default. If
 # the widget passed its default as --backend instead, the panel toggle could
 # never win.
 backend_valid() {
-  case "$1" in codex|opencode-go|ollama-cloud|claude) return 0 ;; *) return 1 ;; esac
+  case "$1" in codex|opencode-go|ollama-cloud|ollama-local|claude) return 0 ;; *) return 1 ;; esac
 }
 
 resolve_backend() {
@@ -140,6 +147,7 @@ backend_label() {
     codex)        printf 'ChatGPT plan' ;;
     opencode-go)  printf 'OpenCode Go' ;;
     ollama-cloud) printf 'Ollama Cloud' ;;
+    ollama-local) printf 'Ollama local' ;;
     claude)       printf 'Claude' ;;
     *)            printf '%s' "$1" ;;
   esac
@@ -151,6 +159,7 @@ model_key() {
     codex)        printf 'model' ;;
     opencode-go)  printf 'goModel' ;;
     ollama-cloud) printf 'ollamaModel' ;;
+    ollama-local) printf 'ollamaLocalModel' ;;
     claude)       printf 'claudeModel' ;;
   esac
 }
@@ -160,6 +169,7 @@ model_default() {
     codex)        printf '%s' "${DEF_MODEL_CODEX:-$DEFAULT_MODEL}" ;;
     opencode-go)  printf '%s' "${DEF_MODEL_GO:-$DEFAULT_GO_MODEL}" ;;
     ollama-cloud) printf '%s' "${DEF_MODEL_OLLAMA:-$DEFAULT_OLLAMA_MODEL}" ;;
+    ollama-local) printf '%s' "${DEF_MODEL_OLLAMA_LOCAL:-$DEFAULT_OLLAMA_LOCAL_MODEL}" ;;
     claude)       printf '%s' "${DEF_MODEL_CLAUDE:-$DEFAULT_CLAUDE_MODEL}" ;;
   esac
 }
@@ -174,6 +184,7 @@ model_options() {
                                  opencode-go/gpt-5.6-luna opencode-go/grok-4.5 opencode-go/deepseek-v4-pro ;;
     ollama-cloud) printf '%s\n' ollama-cloud/glm-5.2 ollama-cloud/gpt-oss:120b ollama-cloud/gpt-oss:20b \
                                  ollama-cloud/kimi-k3 ollama-cloud/minimax-m3 ollama-cloud/mistral-large-3:675b ;;
+    ollama-local) printf '%s\n' qwen3 llama3.2 llama3.3 gemma3 mistral phi4 ;;
     claude)       printf '%s\n' claude-opus-4-8 claude-sonnet-5 claude-haiku-4-5 claude-opus-5 ;;
   esac
 }
@@ -205,11 +216,13 @@ models_json() {
 
 backends_json() {
   jq -nc --arg m0 "$(backend_model codex)" --arg m1 "$(backend_model opencode-go)" \
-         --arg m2 "$(backend_model ollama-cloud)" --arg m3 "$(backend_model claude)" '[
+         --arg m2 "$(backend_model ollama-cloud)" --arg m3 "$(backend_model ollama-local)" \
+         --arg m4 "$(backend_model claude)" '[
     {id:"codex",        label:"ChatGPT",      hint:"codex exec — ephemeral, read-only sandbox", model:$m0},
     {id:"opencode-go",  label:"OpenCode Go",  hint:"via opencode run",                         model:$m1},
     {id:"ollama-cloud", label:"Ollama Cloud", hint:"via opencode run",                         model:$m2},
-    {id:"claude",       label:"Claude",       hint:"claude CLI directly — not through opencode", model:$m3}
+    {id:"ollama-local", label:"Ollama local", hint:"localhost:11434 — the words never leave this machine", model:$m3},
+    {id:"claude",       label:"Claude",       hint:"claude CLI directly — not through opencode", model:$m4}
   ]'
 }
 
@@ -285,6 +298,31 @@ generate() {
           --disallowed-tools "Bash,Read,Write,Edit,WebFetch,WebSearch" \
           > "$out" 2>"$errf"
       return $? ;;
+
+    ollama-local)
+      # Local and private: a plain HTTP call to the Ollama daemon, no CLI
+      # wrapper, no database, nothing leaves the machine. The list of backends
+      # that "need the CLI signed in" stops applying here — the failure mode is
+      # the daemon not running, which extract_error translates.
+      local body; body=$(jq -nc --arg m "$m" --arg msg "$(fenced_message "$prompt" "$hf")" \
+        '{model:$m, stream:false, messages:[{role:"user", content:$msg}]}')
+      local raw; raw=$(mktemp "$STATE_DIR/ollama.XXXXXX")
+      timeout "$TIMEOUT" curl -sS -X POST "http://localhost:11434/api/chat" \
+          -H 'Content-Type: application/json' -d "$body" > "$raw" 2>"$errf"
+      local orc=$?
+      if (( orc == 0 )); then
+        # Ollama reports a missing model as HTTP 200 with an error field, so
+        # the exit status alone cannot be trusted.
+        local content
+        content=$(jq -r 'if .error then "OLLAMA_ERROR: \(.error)" else (.message.content // "") end' "$raw" 2>/dev/null)
+        if [[ "$content" == OLLAMA_ERROR:* ]]; then
+          printf '%s\n' "${content#OLLAMA_ERROR: }" > "$errf"; orc=1
+        else
+          printf '%s' "$content" > "$out"
+        fi
+      fi
+      rm -f "$raw"
+      return $orc ;;
   esac
   return 1
 }
@@ -328,6 +366,14 @@ extract_error() {
   case "$backend" in
     codex)
       msg=$(tr -d '\r' < "$errf" | grep -v '^Reading additional input' | tail -3 | tr '\n' ' ') ;;
+    ollama-local)
+      msg=$(tr -d '\r' < "$errf" | tail -2 | tr '\n' ' ')
+      if [[ -z "${msg//[[:space:]]/}" ]]; then
+        case "$rc" in
+          7)  msg="Ollama is not reachable on localhost:11434 — is the daemon running?" ;;
+          *)  msg="curl exited $rc talking to Ollama on localhost:11434." ;;
+        esac
+      fi ;;
     *)
       msg=$(grep -E 'level=ERROR' "$errf" 2>/dev/null | grep -viE 'duplicate skill' \
             | sed -E 's/^timestamp=[^ ]+ //; s/level=ERROR //' | tail -2 | tr '\n' ' ')
@@ -834,10 +880,11 @@ custom requires --instruction.
   wordsmith model [NAME]                  show or switch the model for the backend
   wordsmith models                        models offered for the current backend
 
-BACKEND ID is one of: codex (ChatGPT plan), opencode-go, ollama-cloud, claude.
-The two opencode backends persist prompts to opencode's database - the session is
-deleted after each rewrite, with retries. codex runs --ephemeral and claude -p
-keeps no transcript, so neither writes the text to disk.
+BACKEND ID is one of: codex (ChatGPT plan), opencode-go, ollama-cloud, ollama-local,
+claude. The two opencode backends persist prompts to opencode's database - the
+session is deleted after each rewrite, with retries. codex runs --ephemeral and
+claude -p keeps no transcript. ollama-local is a plain call to the Ollama daemon
+on localhost:11434 and never leaves this machine.
 
 A quoted thread below your draft (From:, -----Original Message-----, >, ...) is
 split off, never sent to the model, and reattached verbatim. --no-quoted

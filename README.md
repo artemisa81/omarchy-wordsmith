@@ -165,7 +165,8 @@ Work email is the main input here, so the handling is deliberate:
 - `x` in the panel (or `wordsmith clear`) wipes the held text immediately.
 - The words themselves **do go to OpenAI**, under your ChatGPT plan's terms.
   That is the same exposure as pasting into chatgpt.com — no better, no worse,
-  just faster.
+  just faster. The **Ollama local** backend is the escape hatch: the words go
+  to your own daemon on localhost and nowhere else.
 
 Text you are rewriting is frequently a mail somebody else wrote, which makes it
 untrusted input. Every prompt therefore instructs the model to treat the text as
@@ -175,7 +176,7 @@ quoted part is usually split off before that even matters.)
 
 ## Backends
 
-Four, switchable live from the **VIA** row in the panel. The choice persists in
+Five, switchable live from the **VIA** row in the panel. The choice persists in
 `~/.config/omarchy/wordsmith.json`, so it outlives the panel and the shell, and it
 outranks the widget's configured default.
 
@@ -191,6 +192,12 @@ toggle.
 | **Claude** | `claude -p`, directly — *not* through opencode | Yes — no transcript kept |
 | **OpenCode Go** | `opencode run -m opencode-go/…` | No — see below |
 | **Ollama Cloud** | `opencode run -m ollama-cloud/…` | No — see below |
+| **Ollama local** | a plain call to the daemon on `localhost:11434` | Yes — the words never leave this machine |
+
+The fifth backend is for the mail that must not go anywhere at all: no CLI, no
+API key, no disk — just `curl` to your own Ollama daemon. It fails with a clear
+error when the daemon is not running, and it needs whatever model you picked
+pulled first (`ollama pull qwen3`). Speed is your hardware's, not a provider's.
 
 The two opencode backends record every prompt in `~/.local/share/opencode/opencode.db`.
 Wordsmith deletes the session after each rewrite, and because
@@ -211,6 +218,7 @@ outliers are the point.
 | Claude | `claude-opus-4-8` | 6.1s | `claude-haiku-4-5` took **34s** — not the cheap option it looks like |
 | Ollama Cloud | `ollama-cloud/glm-5.2` | **4.6–6.1s** | `gpt-oss:20b` **inverted the meaning**, turning "push the shutdown" into "advancing" it; `gpt-oss:120b` is steadily ~9s |
 | OpenCode Go | `opencode-go/deepseek-v4-flash` | 9.4s | `glm-5.3` **52s**, `kimi-k3` 25s |
+| Ollama local | whatever you have pulled | your hardware | not benchmarked here — every prompt is identical, so the quoted-thread guard and fact check behave the same |
 
 `glm-5.2` on Ollama Cloud was the fastest of anything tested, over three runs —
 though one earlier call took 31s, so Ollama Cloud can spike. The ChatGPT and
@@ -237,6 +245,7 @@ call.
 | Claude model | `claude-opus-4-8` | Called through `claude` directly |
 | OpenCode Go model | `deepseek-v4-flash` | |
 | Ollama Cloud model | `glm-5.2` | |
+| Ollama local model | `qwen3` | Anything you have `ollama pull`ed works |
 | Reasoning effort | `low` | See the note below — this matters a lot |
 | Where to read the text from | `auto` | `auto` · `primary` · `clipboard` |
 | Never rewrite quoted threads | on | Leave it on unless you specifically want a whole thread reworded |

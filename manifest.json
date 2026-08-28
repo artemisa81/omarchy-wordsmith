@@ -31,6 +31,7 @@
       "backend": "codex",
       "goModel": "opencode-go/deepseek-v4-flash",
       "ollamaModel": "ollama-cloud/glm-5.2",
+      "ollamaLocalModel": "qwen3",
       "claudeModel": "claude-opus-4-8"
     },
     "schema": [
@@ -51,11 +52,12 @@
         "key": "backend",
         "type": "enum",
         "label": "Default backend",
-        "description": "Which subscription answers by default. All four are plans you already pay for, not metered API keys. The panel switches live and that choice wins over this one. codex and claude write nothing to disk; the opencode backends record prompts in their own database and the session is deleted after each rewrite.",
+        "description": "Which subscription answers by default. Four are plans you already pay for, not metered API keys; ollama-local talks to a local Ollama daemon and never leaves the machine. The panel switches live and that choice wins over this one. codex, claude and ollama-local write nothing to disk; the opencode backends record prompts in their own database and the session is deleted after each rewrite.",
         "options": [
           "codex",
           "opencode-go",
           "ollama-cloud",
+          "ollama-local",
           "claude"
         ],
         "defaultValue": "codex"
@@ -89,6 +91,21 @@
           "ollama-cloud/mistral-large-3:675b"
         ],
         "defaultValue": "ollama-cloud/glm-5.2"
+      },
+      {
+        "key": "ollamaLocalModel",
+        "type": "enum",
+        "label": "Ollama local model",
+        "description": "Used when the backend is Ollama local. Whatever you have pulled works — qwen3 holds up well on multilingual drafts; switch to llama3.2 on slow hardware. The rewrite only ever runs as fast as the machine serving it.",
+        "options": [
+          "qwen3",
+          "llama3.2",
+          "llama3.3",
+          "gemma3",
+          "mistral",
+          "phi4"
+        ],
+        "defaultValue": "qwen3"
       },
       {
         "key": "claudeModel",

@@ -287,6 +287,7 @@ var BACKENDS = [
   { id: "codex",        label: "ChatGPT",      hint: "codex — ephemeral, read-only sandbox, nothing written to disk" },
   { id: "opencode-go",  label: "OpenCode Go",  hint: "via opencode — prompt hits its database, session deleted after" },
   { id: "ollama-cloud", label: "Ollama Cloud", hint: "via opencode — prompt hits its database, session deleted after" },
+  { id: "ollama-local", label: "Local",        hint: "Ollama on localhost:11434 — the words never leave this machine" },
   { id: "claude",       label: "Claude",       hint: "claude CLI directly, not through opencode — no transcript kept" }
 ]
 
@@ -296,11 +297,11 @@ function backendLabel(id) {
   return id || ""
 }
 
-// Only codex keeps the text off disk entirely; the others need the session
-// cleanup to have run.
+// codex and claude keep the text off disk entirely; ollama-local never sends
+// it anywhere. The opencode backends need the session cleanup to have run.
 function backendIsEphemeral(id) {
   var v = String(id)
-  return v === "codex" || v === "claude"
+  return v === "codex" || v === "claude" || v === "ollama-local"
 }
 
 // The footer used to hardcode codex's guarantees. With four backends the
@@ -317,6 +318,8 @@ function privacyNote(backend) {
       return base + "opencode records the prompt in its own database and Wordsmith deletes the session afterwards — the words go to OpenCode Go."
     case "ollama-cloud":
       return base + "opencode records the prompt in its own database and Wordsmith deletes the session afterwards — the words go to Ollama Cloud."
+    case "ollama-local":
+      return base + "a plain call to your local Ollama daemon on localhost:11434 — the words never leave this machine."
     default:
       return base + "The words leave this machine to whichever backend is selected."
   }

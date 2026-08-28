@@ -240,6 +240,23 @@ sleep 0.5
 grep -q "deleted ses_TEST123" "$AUDIT/session-deletes.log" && ok "session purged" \
   || bad "session purged" "$(cat "$AUDIT/session-deletes.log")"
 
+echo "== ollama-local backend =="
+$WS backend ollama-local >/dev/null
+run_stdin 'local text'
+wait_done done
+assert "local rewrite" "$($WS state | jq -r .result)" "LOCAL-REWRITE"
+$WS model --backend ollama-local gemma3 >/dev/null
+assert "local model persisted" "$(jq -r .ollamaLocalModel "$XDG_CONFIG_HOME/omarchy/wordsmith.json")" "gemma3"
+printf 'l' | env OLLAMA_MODE=down $WS run --stdin >/dev/null 2>&1
+wait_done error
+assert_grep "daemon down is a readable error" "$($WS state | jq -r .error)" "localhost:11434"
+printf 'l' | env OLLAMA_MODE=modelerr $WS run --stdin >/dev/null 2>&1
+wait_done error
+assert_grep "model error surfaced" "$($WS state | jq -r .error)" "model not found"
+printf 'l' | env OLLAMA_MODE=empty $WS run --stdin >/dev/null 2>&1
+wait_done error
+assert "empty local answer is a failure" "$ST" "error"
+
 echo "== unicode, clear, JSON shapes =="
 printf 'สวัสดี Héllo — café' | $WS run --stdin >/dev/null 2>&1
 wait_done done
@@ -248,7 +265,7 @@ assert "unicode survives the state file" "$($WS state | jq -r .original)" "ส�
 $WS clear >/dev/null
 assert "clear resets" "$($WS state | jq -r .status)" "idle"
 assert "clear wipes history" "$($WS state | jq '.history | length')" "0"
-$WS backends | jq -e 'length == 4 and all(.[]; .model != "")' >/dev/null && ok "backends JSON" || bad "backends JSON" "malformed"
+$WS backends | jq -e 'length == 5 and all(.[]; .model != "")' >/dev/null && ok "backends JSON" || bad "backends JSON" "malformed"
 $WS modes | jq -e 'length == 5' >/dev/null && ok "modes JSON" || bad "modes JSON" "malformed"
 rm -f "$XDG_RUNTIME_DIR/wordsmith/state.json"
 $WS state | jq -e '.status == "idle" and (.history | length) == 0' >/dev/null && ok "fresh-boot state" || bad "fresh-boot state" "malformed"
