@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "artemisa81.wordsmith",
   "name": "Wordsmith",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "artemisa81",
   "license": "MIT",
   "description": "Rewrite the text you have selected — Outlook drafts, replies, anything — with Codex running on your existing ChatGPT plan. Select, press a key, read the result, paste.",
