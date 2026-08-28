@@ -272,6 +272,21 @@ for i in 1 2 3 4 5 6 7 8 9 10; do $WS instruction-add "preset $i" >/dev/null; do
 assert "capped at eight" "$($WS instructions | jq '. | length')" "8"
 assert "cap keeps the newest" "$($WS instructions | jq -r '.[0]')" "preset 10"
 
+echo "== auto-paste =="
+$WS clear >/dev/null
+$WS backend codex >/dev/null
+$WS paste 2>&1 | grep -q "no result to paste" && ok "paste with no result dies cleanly" || bad "paste no result" "no error"
+run_stdin 'pastable'
+wait_done done
+PATH=/usr/bin:/bin $WS paste >/dev/null 2>&1
+[[ $? -ne 0 ]] && ok "missing wtype dies cleanly" || bad "missing wtype" "rc=0"
+$WS paste >/dev/null 2>&1
+assert "wtype receives the rewrite on stdin" "$(cat "$AUDIT/wtype.txt")" "REWRITTEN(TEXT 8 CHARS)"
+run_stdin 'older one'
+wait_done done
+$WS paste --index 1 >/dev/null 2>&1
+assert "paste --index walks history" "$(cat "$AUDIT/wtype.txt")" "REWRITTEN(TEXT 8 CHARS)"
+
 echo "== unicode, clear, JSON shapes =="
 printf 'สวัสดี Héllo — café' | $WS run --stdin >/dev/null 2>&1
 wait_done done

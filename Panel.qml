@@ -131,6 +131,9 @@ Panel {
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
     function copy(): void { wordsmith.copy() }
+    // Closes the panel first: the text is typed into whatever holds focus
+    // next, and that must be the app being written in, not this panel.
+    function paste(): void { root.close(); wordsmith.paste() }
     function cancel(): void { wordsmith.cancel() }
     function refresh(): string { wordsmith.refresh(); return "ok" }
     function status(): string { return wordsmith.summary }

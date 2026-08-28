@@ -134,6 +134,7 @@ Item {
   }
 
   function copy() { act(["copy"]) }
+  function paste() { act(["paste"]) }
   function setBackend(id) { act(["backend", String(id)]) }
   function setModel(name) { act(["model", String(name)]) }
 

@@ -2,7 +2,7 @@
 
 Rewrite the text you have selected — an Outlook draft, a reply, a Slack message —
 without leaving the window you are in. Select it, press `SUPER+ALT+E`, read the
-result in the panel, press `Ctrl+V`.
+result in the panel, press `Ctrl+V` — or `SUPER+ALT+R` and it types itself.
 
 It replaces the copy-into-ChatGPT-and-copy-back loop, and every backend bills
 against a **subscription you already pay for** — no API key is involved anywhere.
@@ -13,19 +13,21 @@ against a **subscription you already pay for** — no API key is involved anywhe
 omarchy plugin add https://github.com/artemisa81/omarchy-wordsmith --enable
 ```
 
-Then add the two hotkeys to `~/.config/hypr/bindings.lua` (Hyprland reloads on
+Then add the three hotkeys to `~/.config/hypr/bindings.lua` (Hyprland reloads on
 save):
 
 ```lua
 o.bind("SUPER + ALT + E", "Wordsmith: rewrite selected text", "omarchy-shell artemisa81.wordsmith go")
 o.bind("SUPER + ALT + W", "Wordsmith: open panel", "omarchy-shell artemisa81.wordsmith toggle")
+o.bind("SUPER + ALT + R", "Wordsmith: type rewrite into focused window", "omarchy-shell artemisa81.wordsmith paste")
 ```
 
 **Dependencies.** `jq` and `wl-clipboard` (both in a stock Omarchy install), plus
-at least one backend CLI signed in with its subscription: `codex` (the default),
-`claude`, or `opencode` for the OpenCode Go / Ollama Cloud backends. Backends
-whose CLI is missing simply fail with a clear error when selected — nothing is
-required beyond the one you use.
+`wtype` for `SUPER+ALT+R` (`omarchy pkg add wtype`), and at least one backend
+signed in: `codex` (the default), `claude`, or `opencode` for the OpenCode Go /
+Ollama Cloud backends — or an Ollama daemon on `localhost:11434` for the local
+one. Backends whose CLI is missing simply fail with a clear error when selected
+— nothing is required beyond the one you use.
 
 ## Remove
 
@@ -33,9 +35,10 @@ required beyond the one you use.
 omarchy plugin remove artemisa81.wordsmith
 ```
 
-Delete the two `o.bind` lines from `~/.config/hypr/bindings.lua`, and optionally
-`~/.config/omarchy/wordsmith.json` (the persisted backend/model choice — the only
-file the plugin writes outside its own folder and tmpfs).
+Delete the three `o.bind` lines from `~/.config/hypr/bindings.lua`, and optionally
+`~/.config/omarchy/wordsmith.json` (the persisted backend/model choice and saved
+instructions — the only files the plugin writes outside its own folder and
+tmpfs).
 
 ## The gesture
 
@@ -43,9 +46,17 @@ file the plugin writes outside its own folder and tmpfs).
 |---|---|
 | `SUPER + ALT + E` | Rewrite the selection in the configured default mode, and open the panel |
 | `SUPER + ALT + W` | Open the panel without rewriting anything |
+| `SUPER + ALT + R` | Type the finished rewrite into the focused window — no `Ctrl+V` needed (needs `wtype`) |
 | left-click the bar icon | Open the panel |
 | right-click the bar icon | Rerun the last mode — the "not quite, try again" gesture |
 | middle-click the bar icon | Copy the last rewrite |
+
+`SUPER+ALT+R` types the text as keystrokes, wherever focus is: it closes the
+panel, waits a beat for focus to land back in your draft, and then types —
+newlines and all, so it behaves like paste in a mail composer. If you switch
+windows in that moment the text goes to the new focus, the same risk a manual
+`Ctrl+V` has after an alt-tab. `wordsmith paste --index N` types an earlier
+result instead.
 
 Inside the panel: `1`–`4` pick a mode and run it, `5` jumps to the custom
 instruction box, `c` copies, `r` reruns, `x` cancels a running job or clears a
@@ -298,6 +309,7 @@ bin/wordsmith run --mode custom --instruction "make it two sentences"
 echo "some text" | bin/wordsmith run --stdin --mode shorten
 bin/wordsmith state                            # current job as JSON
 bin/wordsmith copy [--index N]                 # result to clipboard; N walks history
+bin/wordsmith paste [--index N]                # type it into the focused window
 bin/wordsmith cancel                           # abort a running job
 bin/wordsmith clear                            # wipe held text from tmpfs
 

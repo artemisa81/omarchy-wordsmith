@@ -883,8 +883,29 @@ cmd_cancel() {
 }
 
 cmd_clear() {
-  rm -f "$STATE_DIR"/in.* "$STATE_DIR"/head.* "$STATE_DIR"/out.* "$STATE_DIR"/err.* "$STATE"
+  rm -f "$STATE_DIR"/in.* "$STATE_DIR"/head.* "$STATE_DIR"/out.* "$STATE_DIR"/err.* "$STATE_DIR"/ollama.* "$STATE"
   empty_state
+}
+
+# -------------------------------------------------------------- auto-paste ----
+
+# Types the rewrite into whatever window has focus, ending the gesture without
+# Ctrl+V. The panel closes itself before the IPC call lands here, and the
+# settle delay covers the focus returning to the app you were writing in;
+# after that the text goes wherever focus is, so the keybinding is the honest
+# entrance. wtype reads the text from stdin — no argv length limit, no
+# leading-dash parsing, and newlines arrive as real Enter presses.
+cmd_paste() {
+  local r
+  if (( COPY_INDEX > 0 )); then
+    r=$(read_state | jq -r --argjson i "$COPY_INDEX" '.history[$i].result // ""')
+  else
+    r=$(read_state | jq -r '.result // ""')
+  fi
+  [[ -n "${r//[[:space:]]/}" ]] || die "no result to paste"
+  command -v wtype >/dev/null 2>&1 || die "wtype is not installed — omarchy pkg add wtype"
+  sleep 0.2
+  printf '%s' "$r" | wtype -
 }
 
 case "${1:-state}" in
@@ -901,6 +922,7 @@ case "${1:-state}" in
   instructions)      cmd_instructions ;;
   instruction-add)   shift; cmd_instruction_add "$@" ;;
   instruction-remove) shift; cmd_instruction_remove "${1:-}" ;;
+  paste)   cmd_paste ;;
   -h|--help|help)
     cat <<'USAGE'
 wordsmith — rewrite the selected text with Codex, on your ChatGPT plan.
@@ -909,6 +931,7 @@ wordsmith — rewrite the selected text with Codex, on your ChatGPT plan.
   wordsmith state                         current job as JSON
   wordsmith modes                         available modes as JSON
   wordsmith copy [--index N]              result to clipboard (N indexes history)
+  wordsmith paste [--index N]             type the result into the focused window
   wordsmith cancel                        abort the running job
   wordsmith clear                         wipe stored text from tmpfs
 
