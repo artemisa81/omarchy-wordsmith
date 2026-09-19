@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "artemisa81.wordsmith",
   "name": "Wordsmith",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "artemisa81",
   "license": "MIT",
   "description": "Rewrite the text you have selected — Outlook drafts, replies, anything — with Codex running on your existing ChatGPT plan. Select, press a key, read the result, paste.",
@@ -20,7 +20,7 @@
     "defaultSection": "right",
     "defaults": {
       "defaultMode": "professional",
-      "model": "gpt-5.6-sol",
+      "model": "gpt-5.6-luna-fast",
       "reasoningEffort": "low",
       "source": "auto",
       "autoCopy": true,
@@ -28,8 +28,9 @@
       "timeoutSec": 90,
       "maxChars": 20000,
       "preserveQuoted": true,
+      "nameCheck": false,
       "backend": "codex",
-      "goModel": "opencode-go/deepseek-v4-flash",
+      "goModel": "opencode-go/deepseek-flash",
       "ollamaModel": "ollama-cloud/glm-5.2",
       "ollamaLocalModel": "qwen3",
       "claudeModel": "claude-opus-4-8"
@@ -66,8 +67,9 @@
         "key": "goModel",
         "type": "enum",
         "label": "OpenCode Go model",
-        "description": "Used when the backend is OpenCode Go. deepseek-v4-flash is the only quick one here (9.4s); glm-5.3 took 52s and kimi-k3 25s on the same draft.",
+        "description": "Used when the backend is OpenCode Go. DeepSeek V4.1 Flash is the fast model; the older alternatives remain available below.",
         "options": [
+          "opencode-go/deepseek-flash",
           "opencode-go/deepseek-v4-flash",
           "opencode-go/glm-5.3",
           "opencode-go/kimi-k3",
@@ -75,7 +77,7 @@
           "opencode-go/grok-4.5",
           "opencode-go/deepseek-v4-pro"
         ],
-        "defaultValue": "opencode-go/deepseek-v4-flash"
+        "defaultValue": "opencode-go/deepseek-flash"
       },
       {
         "key": "ollamaModel",
@@ -124,8 +126,11 @@
         "key": "model",
         "type": "enum",
         "label": "ChatGPT (codex) model",
-        "description": "Used when the backend is ChatGPT. gpt-5.6-sol was the quickest of these on a real draft (6.8s); gpt-5.4-mini left informal phrasing in place.",
+        "description": "Used when the backend is ChatGPT. GPT-5.6 Luna Fast is the default for lower-latency rewrites; GPT-6 Astra remains available.",
         "options": [
+          "gpt-5.6-luna-fast",
+          "gpt-6-astra",
+          "gpt-6-astra-fast",
           "gpt-5.6-sol",
           "gpt-5.6-terra",
           "gpt-5.6-luna",
@@ -133,13 +138,13 @@
           "gpt-5.4",
           "gpt-5.4-mini"
         ],
-        "defaultValue": "gpt-5.6-sol"
+        "defaultValue": "gpt-5.6-luna-fast"
       },
       {
         "key": "reasoningEffort",
         "type": "enum",
-        "label": "Reasoning effort",
-        "description": "Rewriting a paragraph does not need deliberation. A codex config tuned for coding often runs xhigh, which turns an 8-second rewrite into minutes — this widget ignores that config on purpose.",
+        "label": "Reasoning effort (ChatGPT/codex only)",
+        "description": "Only the ChatGPT (codex) backend reads this; the other four ignore it. Rewriting a paragraph does not need deliberation. A codex config tuned for coding often runs xhigh, which turns an 8-second rewrite into minutes — this widget ignores that config on purpose.",
         "options": [
           "low",
           "medium",
@@ -165,6 +170,13 @@
         "label": "Never rewrite quoted threads",
         "description": "Split a quoted chain (From:, -----Original Message-----, >) off your draft, keep it out of the request entirely, and reattach it byte for byte. Off means a colleague's quoted words get reworded under their name.",
         "defaultValue": true
+      },
+      {
+        "key": "nameCheck",
+        "type": "boolean",
+        "label": "Also flag dropped names (experimental)",
+        "description": "The rewrite is always checked for numbers, percentages, money, emails and URLs that went missing. This adds capitalised names on top, which catches a forgotten name but also fires when a project or product is rephrased legitimately — so it is off by default.",
+        "defaultValue": false
       },
       {
         "key": "autoCopy",

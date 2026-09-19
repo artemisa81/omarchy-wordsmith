@@ -33,7 +33,14 @@ case "${CODEX_MODE:-ok}" in
   fence) printf '```\nREWRITTEN-FENCED\n```' > "$out" ;;
   empty) : > "$out" ;;
   fail)  echo "codex: mock failure" >&2; exit 1 ;;
-  slow)  sleep 30 ;;
+  slow)
+    # Stands in for a real backend call: records that it started, and records
+    # that it was terminated, so the cancel test can prove the signal reached
+    # past the worker into the model process.
+    echo "$$" > "$AUDIT/codex-slow.pid"
+    trap 'echo terminated > "$AUDIT/codex-slow.term"; kill $sp 2>/dev/null; exit 0' TERM
+    sleep 30 & sp=$!
+    wait $sp ;;
 esac
 EOF
 
@@ -48,6 +55,12 @@ EOF
 cat > "$SB/bin/opencode" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1" == "session" && "$2" == "delete" ]]; then
+  n=$(( $(cat "$AUDIT/delete-attempts" 2>/dev/null || echo 0) + 1 ))
+  echo "$n" > "$AUDIT/delete-attempts"
+  if (( n <= ${OC_DELETE_FAILS:-0} )); then
+    echo "database is locked by another opencode instance" >&2
+    exit 1
+  fi
   echo "deleted $3" >> "$AUDIT/session-deletes.log"; exit 0
 fi
 echo "created id=ses_TEST123" >&2
@@ -112,11 +125,33 @@ wait_done() { # wait_status [wanted] — until status equals it, or leaves worki
 
 run_stdin() { printf '%s' "$1" | $WS run --stdin --mode "${2:-shorten}" >/dev/null 2>&1; }
 
+# Before anything writes a config, the script's defaults are what `models`
+# reports — which is exactly what the manifest's `options` and `defaults` must
+# match. This is the test that stops the two lists drifting the way they had to
+# be hand-synced for the last model rename.
+echo "== manifest matches the engine =="
+MANIFEST="$PLUGIN_DIR/manifest.json"
+jq -e . "$MANIFEST" >/dev/null 2>&1 && ok "manifest is valid JSON" || bad "manifest JSON" "unparseable"
+for pair in "codex:model" "opencode-go:goModel" "ollama-cloud:ollamaModel" \
+            "ollama-local:ollamaLocalModel" "claude:claudeModel"; do
+  b="${pair%%:*}"; k="${pair##*:}"
+  want=$(jq -c --arg k "$k" '.barWidget.schema[] | select(.key==$k) | .options' "$MANIFEST")
+  got=$($WS models --backend "$b" | jq -c '.options')
+  assert "manifest options for $k" "$got" "$want"
+  wantdef=$(jq -r --arg k "$k" '.barWidget.defaults[$k]' "$MANIFEST")
+  gotdef=$($WS models --backend "$b" | jq -r '.current')
+  assert "manifest default for $k" "$gotdef" "$wantdef"
+done
+
+echo "== requires a real runtime dir =="
+env -u XDG_RUNTIME_DIR $WS state 2>&1 | grep -q "XDG_RUNTIME_DIR" \
+  && ok "refuses to run without XDG_RUNTIME_DIR" || bad "runtime dir guard" "ran anyway"
+
 echo "== happy path =="
 run_stdin 'Hello there,
 
 This is a draft.'
-wait_done done
+wait_done "done"
 assert "status done" "$ST" "done"
 assert "result" "$($WS state | jq -r .result)" "REWRITTEN(TEXT 30 CHARS)"
 assert "model received the text on stdin" "$(wc -c < "$AUDIT/codex-stdin.txt" | tr -d ' ')" "30"
@@ -125,7 +160,7 @@ assert "source label" "$($WS state | jq -r .source)" "stdin"
 
 echo "== copy, history, indexes =="
 run_stdin 'Second draft.'
-wait_done done
+wait_done "done"
 $WS copy >/dev/null 2>&1
 assert "copy" "$(cat "$WL_DIR/clipboard.txt")" "REWRITTEN(TEXT 13 CHARS)"
 assert "history depth" "$($WS state | jq '.history | length')" "2"
@@ -142,7 +177,7 @@ On Tue, Aug 25, 2026 at 3:14 PM, Alex wrote:
 
 > quoted line one
 > quoted line two'
-wait_done done
+wait_done "done"
 assert "model saw only the draft" "$(cat "$AUDIT/codex-stdin.txt")" "Hi Alex,
 
 Please fix this."
@@ -170,7 +205,7 @@ wait_done error
 assert "empty output is a failure" "$ST" "error"
 
 printf 'f' | env CODEX_MODE=fence $WS run --stdin >/dev/null 2>&1
-wait_done done
+wait_done "done"
 assert "stray fence stripped" "$($WS state | jq -r .result)" "REWRITTEN-FENCED"
 
 printf '' | $WS run --stdin >/dev/null 2>&1
@@ -181,6 +216,15 @@ assert "whitespace-only stdin" "$($WS state | jq -r .error)" "No text on stdin."
 python3 -c "print('a'*1500)" 2>/dev/null | $WS run --stdin --max-chars 1000 >/dev/null 2>&1 \
   || { printf 'a%.0s' {1..1500}; echo; } | $WS run --stdin --max-chars 1000 >/dev/null 2>&1
 assert_grep "maxChars enforced" "$($WS state | jq -r .error)" "the limit is 1000"
+
+# A large multibyte selection exceeds MAX_ARG_STRLEN on the backends that pass
+# the draft in argv. It must come back as an actionable sentence, not a cryptic
+# execve failure.
+echo "== argv backends guard oversize selections =="
+big=$(python3 -c "print('中'*70000)" 2>/dev/null || printf '中%.0s' {1..70000})
+printf '%s' "$big" | $WS run --stdin --backend claude --max-chars 100000 >/dev/null 2>&1
+assert_grep "oversize argv selection explained" "$($WS state | jq -r .error)" "command-line argument"
+unset big
 
 printf 'c' | $WS run --stdin --mode custom >/dev/null 2>&1
 assert "custom needs an instruction" "$($WS state | jq -r .status)" "error"
@@ -200,7 +244,7 @@ echo "== backends, models, persistence =="
 $WS backend claude >/dev/null
 assert "backend persisted" "$(jq -r .backend "$XDG_CONFIG_HOME/omarchy/wordsmith.json")" "claude"
 run_stdin 'cl'
-wait_done done
+wait_done "done"
 assert "claude path" "$($WS state | jq -r .result)" "CLAUDE-REWRITE"
 assert "selectedBackend follows the toggle" "$($WS state | jq -r .selectedBackend)" "claude"
 $WS model claude-sonnet-5 >/dev/null
@@ -218,6 +262,22 @@ sleep 0.3
 assert "cancel returns to idle" "$($WS state | jq -r .status)" "idle"
 $WS cancel >/dev/null 2>&1 && ok "cancel with no job is safe" || bad "cancel with no job" "rc=$?"
 
+# The bug this guards: cancel used to signal only the worker, leaving `timeout`
+# and the backend running and burning plan quota. The fake backend writes a
+# marker when its TERM trap fires, which is the proof the signal got through.
+echo "== cancel reaches the backend =="
+$WS backend codex >/dev/null
+rm -f "$AUDIT/codex-slow.pid" "$AUDIT/codex-slow.term"
+printf 'cancel me' | env CODEX_MODE=slow $WS run --stdin --mode shorten --timeout 60 >/dev/null 2>&1
+for _ in $(seq 1 30); do [[ -s "$AUDIT/codex-slow.pid" ]] && break; sleep 0.1; done
+$WS cancel >/dev/null 2>&1
+for _ in $(seq 1 30); do [[ -f "$AUDIT/codex-slow.term" ]] && break; sleep 0.1; done
+[[ -f "$AUDIT/codex-slow.term" ]] && ok "cancel terminated the backend" \
+  || bad "cancel reached the backend" "model call survived cancel"
+for _ in $(seq 1 20); do [[ ! -e "$XDG_RUNTIME_DIR/wordsmith/job.pid" ]] && break; sleep 0.1; done
+[[ ! -e "$XDG_RUNTIME_DIR/wordsmith/job.pid" ]] && ok "cancel cleared the pidfile" \
+  || bad "cancel pidfile" "still present after cancel"
+
 echo "== selection grab =="
 printf 'is is a test\n\nfull text' > "$WL_DIR/primary.txt"
 printf 'This is a test\n\nfull text' > "$WL_DIR/clipboard.txt"
@@ -234,16 +294,26 @@ assert_grep "nothing selected" "$($WS state | jq -r .error)" "Nothing selected"
 echo "== opencode session purge =="
 $WS backend opencode-go >/dev/null
 run_stdin 'oc'
-wait_done done
+wait_done "done"
 assert "opencode path" "$($WS state | jq -r .result)" "OC-REWRITE"
 sleep 0.5
 grep -q "deleted ses_TEST123" "$AUDIT/session-deletes.log" && ok "session purged" \
   || bad "session purged" "$(cat "$AUDIT/session-deletes.log")"
 
+# A database held by another opencode instance makes delete fail; the id must
+# stay queued and be retried, not silently dropped.
+echo "== opencode purge retries a locked database =="
+: > "$AUDIT/session-deletes.log"; : > "$AUDIT/delete-attempts"
+OC_DELETE_FAILS=2 run_stdin 'oc-retry'
+wait_done "done"
+for _ in $(seq 1 80); do grep -q "deleted ses_TEST123" "$AUDIT/session-deletes.log" && break; sleep 0.25; done
+grep -q "deleted ses_TEST123" "$AUDIT/session-deletes.log" && ok "purge retried until the delete succeeded" \
+  || bad "purge retry" "session still queued after retries"
+
 echo "== ollama-local backend =="
 $WS backend ollama-local >/dev/null
 run_stdin 'local text'
-wait_done done
+wait_done "done"
 assert "local rewrite" "$($WS state | jq -r .result)" "LOCAL-REWRITE"
 $WS model --backend ollama-local gemma3 >/dev/null
 assert "local model persisted" "$(jq -r .ollamaLocalModel "$XDG_CONFIG_HOME/omarchy/wordsmith.json")" "gemma3"
@@ -277,19 +347,19 @@ $WS clear >/dev/null
 $WS backend codex >/dev/null
 $WS paste 2>&1 | grep -q "no result to paste" && ok "paste with no result dies cleanly" || bad "paste no result" "no error"
 run_stdin 'pastable'
-wait_done done
+wait_done "done"
 PATH=/usr/bin:/bin $WS paste >/dev/null 2>&1
 [[ $? -ne 0 ]] && ok "missing wtype dies cleanly" || bad "missing wtype" "rc=0"
 $WS paste >/dev/null 2>&1
 assert "wtype receives the rewrite on stdin" "$(cat "$AUDIT/wtype.txt")" "REWRITTEN(TEXT 8 CHARS)"
 run_stdin 'older one'
-wait_done done
+wait_done "done"
 $WS paste --index 1 >/dev/null 2>&1
 assert "paste --index walks history" "$(cat "$AUDIT/wtype.txt")" "REWRITTEN(TEXT 8 CHARS)"
 
 echo "== unicode, clear, JSON shapes =="
 printf 'สวัสดี Héllo — café' | $WS run --stdin >/dev/null 2>&1
-wait_done done
+wait_done "done"
 assert "chars are codepoints, not bytes" "$($WS state | jq -r .chars)" "19"
 assert "unicode survives the state file" "$($WS state | jq -r .original)" "สวัสดี Héllo — café"
 $WS clear >/dev/null
@@ -299,6 +369,31 @@ $WS backends | jq -e 'length == 5 and all(.[]; .model != "")' >/dev/null && ok "
 $WS modes | jq -e 'length == 5' >/dev/null && ok "modes JSON" || bad "modes JSON" "malformed"
 rm -f "$XDG_RUNTIME_DIR/wordsmith/state.json"
 $WS state | jq -e '.status == "idle" and (.history | length) == 0' >/dev/null && ok "fresh-boot state" || bad "fresh-boot state" "malformed"
+
+echo "== enriched state =="
+$WS backend codex >/dev/null
+$WS state | jq -e '.selectedBackend == "codex"
+  and (.selectedModelOptions | type) == "array"
+  and (.selectedModelOptions | index("gpt-5.6-luna-fast") != null)' >/dev/null \
+  && ok "state carries the selected backend and its model list" \
+  || bad "state model options" "$($WS state | jq -c '{b:.selectedBackend,o:.selectedModelOptions}')"
+# A one-off `--model` from a terminal must not rewrite what every backend is
+# stored as; backends_json reads the native value.
+$WS backends --model gpt-5.4 >/dev/null 2>&1
+$WS backends | jq -e 'all(.[]; .model != "gpt-5.4")' >/dev/null \
+  && ok "--model does not leak into the backend listing" \
+  || bad "backends --model" "$($WS backends | jq -c .)"
+
+echo "== Model.js unit tests =="
+if command -v node >/dev/null 2>&1; then
+  if node "$PLUGIN_DIR/tests/model-test.js" > "$SB/model-test.log" 2>&1; then
+    ok "Model.js unit tests"
+  else
+    bad "Model.js unit tests" "see output above"; cat "$SB/model-test.log"
+  fi
+else
+  echo "SKIP Model.js unit tests (node not installed)"
+fi
 
 echo
 echo "pass=$PASS fail=$FAIL"

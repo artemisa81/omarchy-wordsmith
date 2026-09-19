@@ -13,20 +13,28 @@ set -uo pipefail
 # Everything the model sees is work email, so nothing is written outside
 # XDG_RUNTIME_DIR — tmpfs, mode 700, gone at reboot. Codex itself runs with
 # --ephemeral so it persists no session transcript either.
-STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/wordsmith"
+#
+# No /tmp fallback: /tmp is world-writable and is still a disk. Silently
+# dropping work email there would contradict the promise this tool makes, so
+# refuse to run without a real runtime dir instead.
+[[ -n "${XDG_RUNTIME_DIR:-}" ]] || {
+  printf 'wordsmith: XDG_RUNTIME_DIR is not set — run inside a Wayland session.\n' >&2
+  exit 1
+}
+STATE_DIR="$XDG_RUNTIME_DIR/wordsmith"
 STATE="$STATE_DIR/state.json"
 PIDFILE="$STATE_DIR/job.pid"
 
 CFG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy"
 CFG="$CFG_DIR/wordsmith.json"
 
-DEFAULT_MODEL="gpt-5.6-sol"
+DEFAULT_MODEL="gpt-5.6-luna-fast"
 DEFAULT_EFFORT="low"
 DEFAULT_TIMEOUT=90
 DEFAULT_MAXCHARS=20000
 DEFAULT_SOURCE="auto"
 DEFAULT_BACKEND="codex"
-DEFAULT_GO_MODEL="opencode-go/deepseek-v4-flash"
+DEFAULT_GO_MODEL="opencode-go/deepseek-flash"
 DEFAULT_OLLAMA_MODEL="ollama-cloud/glm-5.2"
 DEFAULT_OLLAMA_LOCAL_MODEL="qwen3"
 DEFAULT_CLAUDE_MODEL="claude-opus-4-8"
@@ -47,7 +55,6 @@ cfg() { # cfg <key> <fallback>
   [[ -n "$v" && "$v" != "null" ]] && printf '%s' "$v" || printf '%s' "$2"
 }
 
-MODEL=$(cfg model "$DEFAULT_MODEL")
 EFFORT=$(cfg reasoningEffort "$DEFAULT_EFFORT")
 TIMEOUT=$(cfg timeoutSec "$DEFAULT_TIMEOUT")
 MAXCHARS=$(cfg maxChars "$DEFAULT_MAXCHARS")
@@ -180,8 +187,8 @@ model_default() {
 # seconds, which is not something a bar widget can afford on every poll.
 model_options() {
   case "$1" in
-    codex)        printf '%s\n' gpt-5.6-sol gpt-5.6-terra gpt-5.6-luna gpt-5.5 gpt-5.4 gpt-5.4-mini ;;
-    opencode-go)  printf '%s\n' opencode-go/deepseek-v4-flash opencode-go/glm-5.3 opencode-go/kimi-k3 \
+    codex)        printf '%s\n' gpt-5.6-luna-fast gpt-6-astra gpt-6-astra-fast gpt-5.6-sol gpt-5.6-terra gpt-5.6-luna gpt-5.5 gpt-5.4 gpt-5.4-mini ;;
+    opencode-go)  printf '%s\n' opencode-go/deepseek-flash opencode-go/deepseek-v4-flash opencode-go/glm-5.3 opencode-go/kimi-k3 \
                                  opencode-go/gpt-5.6-luna opencode-go/grok-4.5 opencode-go/deepseek-v4-pro ;;
     ollama-cloud) printf '%s\n' ollama-cloud/glm-5.2 ollama-cloud/gpt-oss:120b ollama-cloud/gpt-oss:20b \
                                  ollama-cloud/kimi-k3 ollama-cloud/minimax-m3 ollama-cloud/mistral-large-3:675b ;;
@@ -190,12 +197,25 @@ model_options() {
   esac
 }
 
-backend_model() {
+backend_model_native() {
   local b="$1"
-  if [[ -n "$MODEL_OVERRIDE" ]]; then printf '%s' "$MODEL_OVERRIDE"; return; fi
   local v; v=$(cfg "$(model_key "$b")" "")
   if [[ -n "$v" ]]; then printf '%s' "$v"; return; fi
   model_default "$b"
+}
+
+backend_model() {
+  if [[ -n "$MODEL_OVERRIDE" ]]; then printf '%s' "$MODEL_OVERRIDE"; return; fi
+  backend_model_native "$1"
+}
+
+# Whether the draft reaches the backend as a command-line argument (so it is
+# visible in /proc/<pid>/cmdline) rather than on stdin. codex is the only one
+# that pipes it; every other backend puts the fenced text in argv. That also
+# caps the selection at MAX_ARG_STRLEN (~128 KiB) per argument, which a large
+# multibyte selection can hit - see the guard in cmd_run.
+backend_text_in_argv() {
+  [[ "$1" != "codex" ]]
 }
 
 cmd_model() {
@@ -205,7 +225,9 @@ cmd_model() {
   model_options "$b" | grep -qxF "$m" || die "model not offered for $b: $m"
   mkdir -p "$CFG_DIR"
   local cur='{}'; [[ -r "$CFG" ]] && cur=$(cat "$CFG")
-  printf '%s' "$cur" | jq -c --arg k "$(model_key "$b")" --arg m "$m" '.[$k]=$m' > "$CFG.tmp" && mv -f "$CFG.tmp" "$CFG"
+  local tmp; tmp=$(mktemp "$CFG_DIR/.wordsmith.XXXXXX") || die "cannot write config in $CFG_DIR"
+  printf '%s' "$cur" | jq -c --arg k "$(model_key "$b")" --arg m "$m" '.[$k]=$m' > "$tmp" \
+    && mv -f "$tmp" "$CFG" || { rm -f "$tmp"; die "could not update $CFG"; }
   printf '%s\n' "$m"
 }
 
@@ -216,9 +238,9 @@ models_json() {
 }
 
 backends_json() {
-  jq -nc --arg m0 "$(backend_model codex)" --arg m1 "$(backend_model opencode-go)" \
-         --arg m2 "$(backend_model ollama-cloud)" --arg m3 "$(backend_model ollama-local)" \
-         --arg m4 "$(backend_model claude)" '[
+  jq -nc --arg m0 "$(backend_model_native codex)" --arg m1 "$(backend_model_native opencode-go)" \
+         --arg m2 "$(backend_model_native ollama-cloud)" --arg m3 "$(backend_model_native ollama-local)" \
+         --arg m4 "$(backend_model_native claude)" '[
     {id:"codex",        label:"ChatGPT",      hint:"codex exec — ephemeral, read-only sandbox", model:$m0},
     {id:"opencode-go",  label:"OpenCode Go",  hint:"via opencode run",                         model:$m1},
     {id:"ollama-cloud", label:"Ollama Cloud", hint:"via opencode run",                         model:$m2},
@@ -234,7 +256,9 @@ cmd_backend() {
   mkdir -p "$CFG_DIR"
   # Only the choice is persisted here, never any text - this file is not tmpfs.
   local cur='{}'; [[ -r "$CFG" ]] && cur=$(cat "$CFG")
-  printf '%s' "$cur" | jq -c --arg b "$b" '.backend=$b' > "$CFG.tmp" && mv -f "$CFG.tmp" "$CFG"
+  local tmp; tmp=$(mktemp "$CFG_DIR/.wordsmith.XXXXXX") || die "cannot write config in $CFG_DIR"
+  printf '%s' "$cur" | jq -c --arg b "$b" '.backend=$b' > "$tmp" \
+    && mv -f "$tmp" "$CFG" || { rm -f "$tmp"; die "could not update $CFG"; }
   printf '%s\n' "$b"
 }
 
@@ -253,11 +277,15 @@ fenced_message() { # fenced_message <prompt> <textfile>
 generate() {
   local backend="$1" prompt="$2" hf="$3" out="$4" errf="$5"
   local m; m=$(backend_model "$backend")
+  # Every call goes through `timeout --foreground`. Without --foreground, GNU
+  # timeout puts itself and the command in a fresh process group, which would
+  # put the backend out of reach of the group signal `cancel` sends; with it,
+  # timeout stays in the worker's group and forwards the signal to the backend.
   case "$backend" in
     codex)
       # Text arrives on stdin, which codex appends as a distinct <stdin> block -
       # prompt and data stay separated without any quoting of their own.
-      timeout "$TIMEOUT" codex exec \
+      timeout --foreground "$TIMEOUT" codex exec \
           --skip-git-repo-check --ephemeral --ignore-user-config -s read-only \
           -m "$m" -c model_reasoning_effort="$EFFORT" -o "$out" "$prompt" \
           < "$hf" > /dev/null 2>"$errf"
@@ -271,7 +299,7 @@ generate() {
       # untrusted email; without auto-approval an injected tool call stalls and
       # gets killed by the timeout instead of executing. --dir keeps it in tmpfs
       # rather than whatever directory the shell happens to be in.
-      timeout "$TIMEOUT" opencode run --pure --print-logs --log-level INFO \
+      timeout --foreground "$TIMEOUT" opencode run --pure --print-logs --log-level INFO \
           --dir "$ocdir" -m "$m" "$(fenced_message "$prompt" "$hf")" > "$out" 2>"$errf"
       local rc=$?
       # Unlike codex --ephemeral, opencode writes the prompt into
@@ -293,7 +321,7 @@ generate() {
       # --system-prompt is load-bearing too. Claude Code's default persona is an
       # assistant, so without it the output arrives wrapped in "Here's a
       # professional rewrite:" no matter what the prompt asks for.
-      timeout "$TIMEOUT" claude -p "$(fenced_message "$prompt" "$hf")" \
+      timeout --foreground "$TIMEOUT" claude -p "$(fenced_message "$prompt" "$hf")" \
           --model "$m" \
           --system-prompt "$CLAUDE_SYSTEM" \
           --disallowed-tools "Bash,Read,Write,Edit,WebFetch,WebSearch" \
@@ -308,7 +336,7 @@ generate() {
       local body; body=$(jq -nc --arg m "$m" --arg msg "$(fenced_message "$prompt" "$hf")" \
         '{model:$m, stream:false, messages:[{role:"user", content:$msg}]}')
       local raw; raw=$(mktemp "$STATE_DIR/ollama.XXXXXX")
-      timeout "$TIMEOUT" curl -sS -X POST "http://localhost:11434/api/chat" \
+      timeout --foreground "$TIMEOUT" curl -sS -X POST "http://localhost:11434/api/chat" \
           -H 'Content-Type: application/json' -d "$body" > "$raw" 2>"$errf"
       local orc=$?
       if (( orc == 0 )); then
@@ -347,11 +375,11 @@ purge_sessions() {
   [[ -s "$f" ]] || return 0
 
   local pending; pending=$(sort -u "$f"); : > "$f"
-  local sid attempt ok
+  local sid ok
   while IFS= read -r sid; do
     [[ -n "$sid" ]] || continue
     ok=false
-    for attempt in 1 2 3; do
+    for _ in 1 2 3; do
       if timeout 30 opencode session delete "$sid" >/dev/null 2>&1; then ok=true; break; fi
       sleep 2
     done
@@ -405,9 +433,10 @@ cmd_instruction_add() { # instruction-add <text>
   [[ -n "${text//[[:space:]]/}" ]] || die "empty instruction"
   mkdir -p "$CFG_DIR"
   local cur='{}'; [[ -r "$CFG" ]] && cur=$(cat "$CFG")
+  local tmp; tmp=$(mktemp "$CFG_DIR/.wordsmith.XXXXXX") || die "cannot write config in $CFG_DIR"
   printf '%s' "$cur" | jq -c --arg t "$text" --argjson max "$INSTRUCTION_MAX" \
     '.customInstructions = (([$t] + ((.customInstructions // []) | map(select(. != $t)))) | .[0:$max])' \
-    > "$CFG.tmp" && mv -f "$CFG.tmp" "$CFG"
+    > "$tmp" && mv -f "$tmp" "$CFG" || { rm -f "$tmp"; die "could not update $CFG"; }
   read_instructions; echo
 }
 
@@ -415,9 +444,10 @@ cmd_instruction_remove() { # instruction-remove <index>
   local i="${1:-}"
   [[ "$i" =~ ^[0-9]+$ ]] || die "bad index: $i"
   local cur='{}'; [[ -r "$CFG" ]] && cur=$(cat "$CFG")
+  local tmp; tmp=$(mktemp "$CFG_DIR/.wordsmith.XXXXXX") || die "cannot write config in $CFG_DIR"
   printf '%s' "$cur" | jq -c --argjson i "$i" \
     '.customInstructions = ((.customInstructions // []) | del(.[$i]))' \
-    > "$CFG.tmp" && mv -f "$CFG.tmp" "$CFG"
+    > "$tmp" && mv -f "$tmp" "$CFG" || { rm -f "$tmp"; die "could not update $CFG"; }
   read_instructions; echo
 }
 
@@ -508,14 +538,33 @@ empty_state() {
 
 read_state() { [[ -r "$STATE" ]] && cat "$STATE" || empty_state; }
 
+# True only while the pidfile names a live wordsmith worker. `kill -0` alone is
+# not enough: pid reuse after a crash would otherwise let a stale pidfile block
+# every future run - and `cancel` would signal an unrelated process.
+job_alive() {
+  [[ -r "$PIDFILE" ]] || return 1
+  local p; p=$(< "$PIDFILE")
+  [[ "$p" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$p" 2>/dev/null || return 1
+  [[ -r "/proc/$p/cmdline" ]] || return 1
+  tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q 'wordsmith'
+}
+
 # What the widget should display and use for the NEXT run: the persisted toggle,
 # not whatever backend the previous run happened to use. Before this split, a
 # one-off `wordsmith run --backend X` from a terminal leaked into the state file
 # and permanently flipped the widget's backend even though the toggle in
 # wordsmith.json still said otherwise.
+#
+# The offered models ride along here rather than in a second `models` call, so a
+# single state read gives the panel everything it needs and there is no window
+# where the dropdown list belongs to one backend and the label to another.
 enriched_state() {
   local sb; sb=$(resolve_backend)
-  read_state | jq -c --arg sb "$sb" --arg sl "$(backend_label "$sb")"                      --arg sm "$(backend_model "$sb")"     '.selectedBackend=$sb | .selectedBackendLabel=$sl | .selectedModel=$sm'
+  local opts; opts=$(model_options "$sb" | jq -R . | jq -sc .)
+  read_state | jq -c --arg sb "$sb" --arg sl "$(backend_label "$sb")" \
+      --arg sm "$(backend_model_native "$sb")" --argjson so "$opts" \
+    '.selectedBackend=$sb | .selectedBackendLabel=$sl | .selectedModel=$sm | .selectedModelOptions=$so'
 }
 
 set_state() { # set_state <status> [key value ...]
@@ -595,12 +644,21 @@ norm_ws() { printf '%s' "$1" | tr -s '[:space:]' ' ' | sed -e 's/^ //' -e 's/ $/
 # A truncated read can only lose characters, never gain them, so sampling the
 # same selection a few times and keeping the longest read converges on the
 # full text without ever inventing any.
+#
+# Timed out on purpose: a selection owner that never answers must not stall the
+# keypress before `run` has even forked. The whole sampling pass shares one
+# timeout, so a hung owner costs two seconds, not two per sample — a normal read
+# still finishes in milliseconds because the loop exits as soon as it is done.
 best_read() { # best_read <wl-paste args...>
-  local best="" s
-  for _ in 1 2 3; do
-    s=$(wl-paste --no-newline -t text/plain "$@" 2>/dev/null) || continue
-    [[ ${#s} -gt ${#best} ]] && best=$s
-  done
+  local best=""
+  best=$(timeout 2 bash -c '
+    best=""
+    for _ in 1 2 3; do
+      s=$(wl-paste --no-newline -t text/plain "$@" 2>/dev/null) || continue
+      [[ ${#s} -gt ${#best} ]] && best=$s
+    done
+    printf "%s" "$best"
+  ' wordsmith "$@")
   printf '%s' "$best"
 }
 
@@ -679,11 +737,29 @@ count_placeholders() {
 # string, because a widget that silently stops is worse than one that complains.
 worker() {
   local mode="$1" label="$2" started="$3" headfile="$4" tail_text="$5" backend="$6"
+  # The job-control mode cmd_run enabled gave this worker its own process group;
+  # turn it back off here so the foreground `timeout` and backend stay in that
+  # group instead of being placed in a fresh one, where a group signal would
+  # no longer reach them.
+  set +m
   local out errf
   out=$(mktemp "$STATE_DIR/out.XXXXXX")
   errf=$(mktemp "$STATE_DIR/err.XXXXXX")
   # shellcheck disable=SC2064
   trap "rm -f '$out' '$errf' '$headfile' '$PIDFILE'" EXIT
+
+  # `wordsmith cancel` signals this worker's process group (cmd_run launches it
+  # as a group leader on purpose). That reaches the model call too: without
+  # this, cancelling left `timeout` and the backend running, quietly burning
+  # plan quota, and the EXIT trap never fired so the temp files leaked.
+  # shellcheck disable=SC2329 # invoked by the trap below, not called directly
+  worker_term() {
+    trap - TERM INT
+    rm -f "$out" "$errf" "$headfile" "$PIDFILE"
+    kill -TERM 0 2>/dev/null || true
+    exit 143
+  }
+  trap worker_term TERM INT
 
   local prompt; prompt=$(mode_prompt "$mode")
 
@@ -748,12 +824,18 @@ worker() {
 
   purge_sessions
 
-  local extra=""
-  [[ "$AUTOCOPY" == "true" ]] && extra=" and copied"
+  # Say what actually happened: with auto-copy off there is nothing on the
+  # clipboard, so "Press Ctrl+V" would be a lie.
   if (( ${phs:-0} > 0 )); then
-    notify normal "Wordsmith — $label" "Ready$extra — ${phs} placeholder(s) to complete before sending."
+    if [[ "$AUTOCOPY" == "true" ]]; then
+      notify normal "Wordsmith — $label" "Ready and copied — ${phs} placeholder(s) to complete before sending."
+    else
+      notify normal "Wordsmith — $label" "Ready — ${phs} placeholder(s) to complete. Open Wordsmith to copy."
+    fi
+  elif [[ "$AUTOCOPY" == "true" ]]; then
+    notify normal "Wordsmith — $label" "Rewrite ready and copied. Press Ctrl+V."
   else
-    notify normal "Wordsmith — $label" "Rewrite ready$extra. Press Ctrl+V."
+    notify normal "Wordsmith — $label" "Rewrite ready. Open Wordsmith to copy it."
   fi
 }
 
@@ -782,7 +864,7 @@ cmd_run() {
 
   # One job at a time. A second keypress while the first is in flight is almost
   # always an impatient repeat, not a request for two rewrites.
-  if [[ -r "$PIDFILE" ]] && kill -0 "$(< "$PIDFILE")" 2>/dev/null; then
+  if job_alive; then
     read_state; return 0
   fi
 
@@ -811,7 +893,7 @@ cmd_run() {
 
   # Flagged, not corrected: a selection that starts mid-sentence is still worth
   # rewriting, the user just needs to know the capture may be short.
-  local capture_note; capture_note=$(capture_note "$SELECTED")
+  local note; note=$(capture_note "$SELECTED")
 
   local full; full=$(mktemp "$STATE_DIR/in.XXXXXX")
   printf '%s' "$SELECTED" > "$full"
@@ -835,11 +917,25 @@ cmd_run() {
   fi
 
   local backend; backend=$(resolve_backend)
+
+  # MAX_ARG_STRLEN caps a single argv entry at ~128 KiB, so a large selection on
+  # an argv backend fails at execve with a cryptic E2BIG. Catch it with a
+  # sentence the user can act on instead.
+  if backend_text_in_argv "$backend"; then
+    local bytes; bytes=$(printf '%s' "$SELECTED" | wc -c | tr -d ' ')
+    if (( bytes > 120000 )); then
+      set_state error error "$(backend_label "$backend") passes the draft as a command-line argument, which tops out near 128 KB; this selection is ${bytes} bytes. Use ChatGPT (codex) for something this long." \
+        mode "$mode" modeLabel "$label" original "" result ""
+      notify normal "Wordsmith" "Selection too long for $(backend_label "$backend") — try codex."
+      read_state; return 0
+    fi
+  fi
+
   local started; started=$(date +%s%3N)
   jq -nc --arg mode "$mode" --arg label "$label" --arg src "$SELECTED_SRC" \
         --arg original "$SELECTED" --arg model "$(backend_model "$backend")" --arg instruction "$INSTRUCTION" \
         --arg backend "$backend" --arg backendLabel "$(backend_label "$backend")" \
-        --arg quoted "$tail_text" --arg captureNote "$capture_note" \
+        --arg quoted "$tail_text" --arg captureNote "$note" \
         --argjson chars "${#SELECTED}" --argjson started "$started" \
         --argjson quotedLines "${quoted_lines:-0}" \
         --argjson history "$(read_state | jq -c '.history // []')" \
@@ -849,9 +945,14 @@ cmd_run() {
       quotedLines:$quotedLines, placeholders:0, history:$history,
       backend:$backend, backendLabel:$backendLabel, captureNote:$captureNote}' | write_state
 
+  # Job control puts the worker in its own process group so `cancel` can signal
+  # the group - worker, `timeout` and the backend together. `disown` drops the
+  # job so no "[1]+ Done" line can land on stderr next to the JSON on stdout.
+  set -m
   worker "$mode" "$label" "$started" "$headfile" "$tail_text" "$backend" &
   echo $! > "$PIDFILE"
   disown 2>/dev/null || true
+  set +m
 
   read_state
 }
@@ -874,7 +975,9 @@ cmd_copy() {
 }
 
 cmd_cancel() {
-  if [[ -r "$PIDFILE" ]]; then
+  # job_alive rather than a bare pidfile so a recycled pid can never make this
+  # kill an unrelated process.
+  if job_alive; then
     local p; p=$(< "$PIDFILE")
     kill -TERM -- "-$p" 2>/dev/null || kill -TERM "$p" 2>/dev/null || true
     rm -f "$PIDFILE"

@@ -10,7 +10,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-      - name: Run the engine test suite
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq shellcheck
+      - name: Lint the shell
+        run: shellcheck -S warning bin/wordsmith tests/run-tests.sh
+      - name: Run the engine and Model.js test suites
         run: bash tests/run-tests.sh
+      - name: Validate the plugin manifest
+        run: |
+          if command -v omarchy-plugin-validate >/dev/null 2>&1; then
+            omarchy-plugin-validate .
+          else
+            echo "omarchy-plugin-validate is not on this runner; its structural checks"
+            echo "ran inside tests/run-tests.sh against the same manifest."
+          fi

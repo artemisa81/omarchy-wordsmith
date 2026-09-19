@@ -114,6 +114,12 @@ The boundary is detected from `From:`, `Sent:`, `-----Original Message-----`,
 `--- Forwarded message`, `On … wrote:`, `El … escribió:`, a long underscore rule,
 or a leading `>`. The panel then tells you `13 quoted lines left untouched`.
 
+That detection is a heuristic, so a draft that legitimately contains a line
+starting `From:` or `Sent:` — a stock reply template, say — can be split earlier
+than you meant. The panel tells you how many lines it held back, and
+**Never rewrite quoted threads** (or `--no-quoted`) turns the split off entirely
+if a draft keeps tripping it.
+
 If everything *above* the boundary is blank — you selected a received mail rather
 than a draft above a quote — it rewrites the whole thing, since that is clearly
 what you meant. Turn the whole behaviour off with **Never rewrite quoted
@@ -131,9 +137,14 @@ rewrite the panel compares the two and warns:
 
 Deliberately narrow — numbers of two or more digits, percentages, money, emails
 and URLs. Single digits are excluded because a rewrite spelling "3" as "three" is
-correct, and names are excluded because they get rephrased legitimately all the
-time. `1,000` becoming `1000` is not reported. A check that cries wolf is a check
-you learn to ignore.
+correct. `1,000` becoming `1000` is not reported. A check that cries wolf is a
+check you learn to ignore.
+
+Capitalised names can be added on top with **Also flag dropped names**, but they
+are off by default for exactly that reason: a rewrite dropping "the Phoenix
+migration" to "the migration" is a legitimate rephrase, not a lost fact. Turn it
+on when you are checking a draft where a person's or client's name going missing
+would be the expensive failure, and read the warnings with that in mind.
 
 ## Earlier results
 
@@ -185,6 +196,19 @@ Work email is the main input here, so the handling is deliberate:
   just faster. The **Ollama local** backend is the escape hatch: the words go
   to your own daemon on localhost and nowhere else.
 
+There is one caveat worth stating plainly, because the rest of this section
+sounds more absolute than it is. Only **ChatGPT (codex)** receives the draft on
+stdin. Every other backend is handed the text as a **command-line argument**,
+which any local process can read out of `/proc/<pid>/cmdline` while the rewrite
+runs. That is local-only and short-lived, and it is the price of how those CLIs
+accept a prompt — `claude -p` answers the mail as if it were addressed to it
+when the text arrives on stdin, and `opencode run` takes a positional message.
+The words still never touch the disk and never leave the machine except to the
+provider you chose; if argv exposure matters for a given mail, use codex or the
+local backend. That same argv limit is why a very large selection (over ~120 KB,
+reachable only if you raise **Maximum selection**) is refused on those backends
+with a sentence telling you to switch to codex.
+
 Text you are rewriting is frequently a mail somebody else wrote, which makes it
 untrusted input. Every prompt therefore instructs the model to treat the text as
 data and ignore any instruction inside it, so an "ignore previous instructions and
@@ -231,22 +255,23 @@ outliers are the point.
 
 | Backend | Default | Time | Rejected |
 |---|---|---|---|
-| ChatGPT | `gpt-5.6-sol` | 6.8s | `gpt-5.4-mini` (7.3s) left informal phrasing in place |
+| ChatGPT | `gpt-5.6-luna-fast` | OpenAI fast tier | `gpt-6-astra` remains available as an alternate |
 | Claude | `claude-opus-4-8` | 6.1s | `claude-haiku-4-5` took **34s** — not the cheap option it looks like |
 | Ollama Cloud | `ollama-cloud/glm-5.2` | **4.6–6.1s** | `gpt-oss:20b` **inverted the meaning**, turning "push the shutdown" into "advancing" it; `gpt-oss:120b` is steadily ~9s |
-| OpenCode Go | `opencode-go/deepseek-v4-flash` | 9.4s | `glm-5.3` **52s**, `kimi-k3` 25s |
+| OpenCode Go | `opencode-go/deepseek-flash` (DeepSeek V4.1 Flash) | fast tier | older `glm-5.3` and `kimi-k3` alternatives remain available |
 | Ollama local | whatever you have pulled | your hardware | not benchmarked here — every prompt is identical, so the quoted-thread guard and fact check behave the same |
 
 `glm-5.2` on Ollama Cloud was the fastest of anything tested, over three runs —
 though one earlier call took 31s, so Ollama Cloud can spike. The ChatGPT and
 Claude defaults are within a second of each other and were steady. Every backend keeps the same
 prompts, so the quoted-thread guard, bracket placeholders and fact check behave
-identically across all four.
+identically across all five.
 
 Pick a model live from the dropdown under the VIA row — the list comes from the
-script, so there is one place to edit when a provider adds a model. Each backend
-remembers its own model, so switching to Claude and back to ChatGPT does not
-disturb either choice.
+script, so there is one place to edit when a provider adds a model. To stop the
+manifest's copy of that list drifting from the script's, the test suite asserts
+the two match; each backend remembers its own model, so switching to Claude and
+back to ChatGPT does not disturb either choice.
 
 ## Configuration
 
@@ -258,14 +283,15 @@ call.
 |---|---|---|
 | Default mode | `professional` | What `SUPER+ALT+E` uses |
 | Default backend | `codex` | The panel's live choice wins over this |
-| ChatGPT model | `gpt-5.6-sol` | See the table above |
+| ChatGPT model | `gpt-5.6-luna-fast` | See the table above |
 | Claude model | `claude-opus-4-8` | Called through `claude` directly |
-| OpenCode Go model | `deepseek-v4-flash` | |
+| OpenCode Go model | `deepseek-flash` (DeepSeek V4.1 Flash) | |
 | Ollama Cloud model | `glm-5.2` | |
 | Ollama local model | `qwen3` | Anything you have `ollama pull`ed works |
-| Reasoning effort | `low` | See the note below — this matters a lot |
+| Reasoning effort | `low` | **ChatGPT (codex) only** — the other four backends ignore it. This matters a lot for codex |
 | Where to read the text from | `auto` | `auto` · `primary` · `clipboard` |
 | Never rewrite quoted threads | on | Leave it on unless you specifically want a whole thread reworded |
+| Also flag dropped names | off | Adds names to the dropped-fact check; noisy on legitimate rephrasing, so experimental |
 | Copy the result automatically | on | Ends the gesture at `Ctrl+V`; does overwrite your clipboard |
 | Notify when ready | on | A rewrite takes ~7s, long enough to look away |
 | Timeout | 90s | |
@@ -321,7 +347,22 @@ bin/wordsmith instruction-remove 0             # delete the first saved one
 `run` returns immediately and forks the model call, which is what keeps the bar
 responsive; poll `state` until `status` is no longer `working`. Only one job runs
 at a time — a second `run` while one is in flight returns the current state
-rather than queueing, since it is almost always an impatient repeat.
+rather than queueing, since it is almost always an impatient repeat. `cancel`
+signals the worker's whole process group, so it stops the in-flight model call
+itself, not just the shell around it.
+
+## Tests
+
+```sh
+bash tests/run-tests.sh     # the engine, with fake backends on PATH — no model is called
+node tests/model-test.js    # the QML-side Model.js logic (placeholders, dropped facts)
+```
+
+`run-tests.sh` sandboxes itself in a temp dir, so it touches neither your real
+config nor your runtime dir. It also asserts the manifest's model lists and
+defaults still match the script's — the two used to be hand-synced, and the test
+is what stops them drifting. CI lints both scripts with `shellcheck`, runs both
+suites, and validates the manifest on any runner that has `omarchy`.
 
 ## Troubleshooting
 

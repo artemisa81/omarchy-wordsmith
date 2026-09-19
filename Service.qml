@@ -17,6 +17,13 @@ Item {
   // picking up a different `wordsmith` that happens to be on PATH.
   readonly property string exe: String(Qt.resolvedUrl("bin/wordsmith")).replace(/^file:\/\//, "")
 
+  // The engine's state file, watched below so a finished rewrite shows up the
+  // moment it lands rather than on the next poll. The directory only appears
+  // after the first run, so the watch is a bonus on top of the periodic read,
+  // never the only source.
+  readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR") || ""
+  readonly property string statePath: runtimeDir !== "" ? runtimeDir + "/wordsmith/state.json" : ""
+
   readonly property string defaultMode: String(setting("defaultMode", "professional"))
   readonly property string model: String(setting("model", ""))
   readonly property string effort: String(setting("reasoningEffort", "low"))
@@ -24,6 +31,10 @@ Item {
   readonly property bool autoCopy: setting("autoCopy", true) !== false
   readonly property bool notifyEnabled: setting("notify", true) !== false
   readonly property bool preserveQuoted: setting("preserveQuoted", true) !== false
+  // Off by default: the dropped-fact check is deliberately narrow, and the name
+  // half of it fires on legitimate rephrasing often enough to be noise unless
+  // someone opts in.
+  readonly property bool nameCheck: setting("nameCheck", false) === true
   // Deliberately empty fallbacks: an unset setting must fall through to the
   // script's own default rather than a second copy of it here. shell.json does
   // not receive the manifest's defaultValue, so a non-empty fallback would
@@ -150,23 +161,12 @@ Item {
   function removeInstruction(i) { act(["instruction-remove", String(i)]) }
 
   // The offered models come from the script rather than a second copy of the
-  // list in QML, so there is one place to edit when a provider adds a model.
-  property var modelOptions: []
+  // list in QML, and they ride along in the same state read that carries the
+  // selected backend. Before, a separate `models` fetch raced the state re-read
+  // and the dropdown could sit one backend behind every switch; one read cannot
+  // disagree with itself.
+  readonly property var modelOptions: state.selectedModelOptions || []
 
-  // Which backend the in-flight `models` call was launched for, and whether a
-  // newer request arrived while it ran. Both are needed because the list is
-  // fetched twice per switch: once right after the action (when `backend` is
-  // still the old value, since the state re-read has not landed) and again when
-  // `backend` actually changes. Without tracking, the first answer wins and the
-  // list sits one backend behind every switch.
-  property string _modelsFor: ""
-  property bool _modelsPending: false
-
-  function refreshModels() {
-    if (modelsProcess.running) { _modelsPending = true; return }
-    _modelsFor = backend
-    modelsProcess.running = true
-  }
   function copyIndex(i) { act(["copy", "--index", String(i)]) }
   function cancel() { act(["cancel"]) }
   function clear() { act(["clear"]) }
@@ -183,38 +183,31 @@ Item {
     actionProcess.running = true
   }
 
-  onBackendChanged: refreshModels()
-
   Timer {
-    // Two speeds on purpose. A rewrite lands in six to nine seconds, so while
-    // one is in flight the panel needs to feel live; the rest of the time this
-    // widget has nothing to poll for and should cost nothing.
+    // Two speeds. While a rewrite is in flight the panel needs to feel live;
+    // `stateProcess` is the authoritative read (it carries the selected backend
+    // and its model list), so it still backs the UI. Once a run has happened,
+    // FileView below reacts to the state file changing, and the timer drops to
+    // a slow safety net for the cases a file watch cannot see — a backend
+    // switched from a terminal, or the very first load before the file exists.
     id: pollTimer
-    interval: root.working ? 700 : 6000
+    interval: root.working ? 700 : 45000
     repeat: true
     running: true
     triggeredOnStart: true
     onTriggered: root.refresh()
   }
 
-  Process {
-    id: modelsProcess
-    running: false
-    command: [root.exe, "models"].concat(root.flags())  // --backend comes from flags()
-    stdout: StdioCollector { id: modelsStdout; waitForEnd: true }
-    onExited: function(exitCode) {
-      var parsed = Model.parse(modelsStdout.text)
-      // Accept only a list that belongs to the backend on screen. Showing a
-      // stale list is worse than briefly showing the previous one, because
-      // the dropdown would then offer models the active backend cannot serve.
-      if (parsed && parsed.options && String(parsed.backend) === root.backend)
-        root.modelOptions = parsed.options
-
-      if (root._modelsPending || root._modelsFor !== root.backend) {
-        root._modelsPending = false
-        Qt.callLater(root.refreshModels)
-      }
-    }
+  FileView {
+    // The engine writes state.json with mktemp + mv, so a watcher here always
+    // sees a whole document. This turns "poll until it finishes" into "react
+    // when it finishes": zero idle cost once a run has happened.
+    path: root.statePath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.refresh()
+    onLoadFailed: {}
   }
 
   Process {
@@ -263,7 +256,6 @@ Item {
       if (exitCode !== 0)
         root.lastError = String(actionStderr.text || "").trim() || "wordsmith command failed"
       root.refresh()
-      root.refreshModels()
       root.refreshInstructions()
       if (root._queued) {
         var next = root._queued

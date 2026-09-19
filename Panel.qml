@@ -41,7 +41,7 @@ Panel {
   // from a different selection, and a fact check on the wrong baseline is worse
   // than none.
   readonly property string droppedNote: viewIndex === 0
-    ? Model.droppedNote(wordsmith.original, wordsmith.result) : ""
+    ? Model.droppedNote(wordsmith.original, wordsmith.result, wordsmith.nameCheck) : ""
 
   function cssColor(c) {
     return "rgba(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + ","
@@ -99,7 +99,6 @@ Panel {
 
   onOpenedChanged: if (opened) {
     wordsmith.refresh()
-    wordsmith.refreshModels()
     wordsmith.refreshInstructions()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }

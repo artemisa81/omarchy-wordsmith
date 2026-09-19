@@ -220,11 +220,12 @@ function nameTokens(text) {
     var tok = m[2]
     // Start of text, or start of a sentence or line: ambiguous, so skipped.
     if (prev === "" || prev === "." || prev === "!" || prev === "?" || prev === "\n") {
-      // A multi-word run that merely *begins* a sentence still carries a name
-      // in its later words — keep those.
-      var parts = tok.split(/\s+/)
-      if (parts.length < 2) continue
-      tok = parts.slice(1).join(" ")
+      // A lone capitalised word at a sentence start is genuinely ambiguous
+      // ("Thanks" the greeting vs "Thanks" the surname). A multi-word run is
+      // not: keep it whole, so "Carol Danvers" stays one token and "Carol
+      // replied" reads as the name being partly kept rather than "Danvers"
+      // having vanished.
+      if (tok.indexOf(" ") === -1) continue
     }
     if (NAME_STOP.indexOf(tok) !== -1) continue
     if (tok.length < 2) continue
@@ -254,8 +255,13 @@ function droppedNames(original, result) {
   return missing
 }
 
-function droppedNote(original, result) {
-  var m = droppedFacts(original, result).concat(droppedNames(original, result))
+// `includeNames` is off by default because name detection is the noisy half:
+// it fires on any capitalised word that leaves the text, and rewrites legitimately
+// drop project and product names ("the Phoenix migration" -> "the migration").
+// Facts are always checked; names are for someone who wants the extra net.
+function droppedNote(original, result, includeNames) {
+  var m = droppedFacts(original, result)
+  if (includeNames) m = m.concat(droppedNames(original, result))
   if (m.length === 0) return ""
   var shown = m.slice(0, 4).join(", ")
   return "Not found in the rewrite: " + shown + (m.length > 4 ? " (+" + (m.length - 4) + " more)" : "")
