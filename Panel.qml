@@ -263,7 +263,9 @@ Panel {
             fontFamily: root.fontFamily
           }
 
-          Row {
+          // Flow, not Row: six backends do not fit on one line at this panel
+          // width, and a Row would clip the last button off the edge.
+          Flow {
             width: parent.width
             spacing: Style.space(6)
 
