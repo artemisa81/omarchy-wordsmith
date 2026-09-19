@@ -40,6 +40,8 @@ DEFAULT_OLLAMA_LOCAL_MODEL="qwen3"
 DEFAULT_CLAUDE_MODEL="claude-opus-4-8"
 HISTORY_MAX=3
 INSTRUCTION_MAX=8
+# Kept in step with manifest.json by the test suite.
+VERSION="1.3.0"
 
 umask 077
 mkdir -p "$STATE_DIR"
@@ -139,7 +141,7 @@ set -- ${_rest+"${_rest[@]}"}
 # the widget passed its default as --backend instead, the panel toggle could
 # never win.
 backend_valid() {
-  case "$1" in codex|opencode-go|ollama-cloud|ollama-local|claude) return 0 ;; *) return 1 ;; esac
+  case "$1" in codex|opencode-go|ollama-cloud|ollama-local|claude|agent) return 0 ;; *) return 1 ;; esac
 }
 
 resolve_backend() {
@@ -156,6 +158,7 @@ backend_label() {
     opencode-go)  printf 'OpenCode Go' ;;
     ollama-cloud) printf 'Ollama Cloud' ;;
     ollama-local) printf 'Ollama local' ;;
+    agent)        printf 'Default agent' ;;
     claude)       printf 'Claude' ;;
     *)            printf '%s' "$1" ;;
   esac
@@ -210,12 +213,21 @@ backend_model() {
 }
 
 # Whether the draft reaches the backend as a command-line argument (so it is
-# visible in /proc/<pid>/cmdline) rather than on stdin. codex is the only one
-# that pipes it; every other backend puts the fenced text in argv. That also
-# caps the selection at MAX_ARG_STRLEN (~128 KiB) per argument, which a large
-# multibyte selection can hit - see the guard in cmd_run.
+# visible in /proc/<pid>/cmdline) rather than on stdin. codex and opencode read
+# it on stdin; claude and the raw Ollama HTTP body put it in argv. The "agent"
+# backend delegates to whichever concrete backend it resolves to, so its answer
+# depends on `omarchy default agent`. That also caps the selection at
+# MAX_ARG_STRLEN (~128 KiB) per argument, which a large multibyte selection can
+# hit - see the guard in cmd_run.
 backend_text_in_argv() {
-  [[ "$1" != "codex" ]]
+  local b="$1"
+  if [[ "$b" == "agent" ]]; then
+    b=$(omarchy default agent 2>/dev/null || true)
+    [[ -n "$b" ]] || return 0
+    # Mirror the mapping generate() uses for the agent backend.
+    case "$b" in codex|opencode) return 1 ;; *) return 0 ;; esac
+  fi
+  case "$b" in codex|opencode-go) return 1 ;; *) return 0 ;; esac
 }
 
 cmd_model() {
@@ -245,14 +257,15 @@ backends_json() {
     {id:"opencode-go",  label:"OpenCode Go",  hint:"via opencode run",                         model:$m1},
     {id:"ollama-cloud", label:"Ollama Cloud", hint:"via opencode run",                         model:$m2},
     {id:"ollama-local", label:"Ollama local", hint:"localhost:11434 — the words never leave this machine", model:$m3},
-    {id:"claude",       label:"Claude",       hint:"claude CLI directly — not through opencode", model:$m4}
+    {id:"claude",       label:"Claude",       hint:"claude CLI directly — not through opencode", model:$m4},
+    {id:"agent",        label:"Default agent", hint:"whatever `omarchy default agent` names, with its tools off", model:""}
   ]'
 }
 
 cmd_backend() {
   local b="${1:-}"
   [[ -n "$b" ]] || { resolve_backend; echo; return 0; }
-  backend_valid "$b" || die "unknown backend: $b (codex, opencode-go, ollama-cloud, claude)"
+  backend_valid "$b" || die "unknown backend: $b (codex, opencode-go, ollama-cloud, ollama-local, claude, agent)"
   mkdir -p "$CFG_DIR"
   # Only the choice is persisted here, never any text - this file is not tmpfs.
   local cur='{}'; [[ -r "$CFG" ]] && cur=$(cat "$CFG")
@@ -266,6 +279,62 @@ cmd_backend() {
 # Claude Code ships an assistant persona; a rewriting tool needs it gone.
 CLAUDE_SYSTEM='You are a text-rewriting engine, not an assistant. You never converse, never explain, never add a preamble or a sign-off of your own, and never answer the text as if it were addressed to you. You emit only the rewritten text.'
 
+# Codex has no single "no tools" switch, but exposes each tool-bearing feature as
+# its own config key, so the lot is turned off by name. Unlike the one-line
+# switches the other agents have, this is a list, so the read-only sandbox in
+# the codex invocation below sits under it as a second layer and this needs
+# revisiting when codex ships a new feature.
+CODEX_NO_TOOLS=(
+  -c 'web_search="disabled"'
+  -c features.shell_tool=false
+  -c features.unified_exec=false
+  -c features.shell_snapshot=false
+  -c features.browser_use=false
+  -c features.browser_use_external=false
+  -c features.browser_use_full_cdp_access=false
+  -c features.computer_use=false
+  -c features.apps=false
+  -c features.plugins=false
+  -c features.remote_plugin=false
+  -c features.multi_agent=false
+  -c features.hooks=false
+  -c features.memories=false
+  -c tools.web_search=false
+  -c tools.view_image=false
+  -c tools.apps=false
+)
+
+# opencode runs as an agent defined here rather than read from the user's
+# config, so `tools:{"*":false}` turns off every tool - built-in, from a plugin,
+# present or added later - regardless of what the user has set up. It is passed
+# inline because a config that travels through the environment can be ignored
+# without saying so, which is why opencode_tools_off reads it back before any
+# text is sent.
+OPENCODE_AGENT_CONFIG='{"agent":{"wordsmith":{"mode":"primary","description":"rewrite text","tools":{"*":false}}}}'
+
+# Ask opencode what the agent resolved to and insist every tool is off. `debug
+# agent` resolves the same config a run would use without contacting a model.
+# Anything other than a parseable object with nothing but false in it refuses
+# the run, so an opencode that ignored OPENCODE_CONFIG_CONTENT and fell back to
+# its default agent cannot quietly run with every tool on.
+opencode_tools_off() {
+  local tmp resolved
+  tmp=$(mktemp "$STATE_DIR/ocagent.XXXXXX") || return 1
+  chmod 600 "$tmp" 2>/dev/null
+  if ! env OPENCODE_CONFIG_CONTENT="$OPENCODE_AGENT_CONFIG" \
+       opencode debug agent wordsmith >"$tmp" 2>/dev/null; then
+    rm -f "$tmp"; return 1
+  fi
+  resolved=$(cat "$tmp"); rm -f "$tmp"
+  [[ -n "$resolved" ]] || return 1
+  printf '%s' "$resolved" | jq -e '
+    (.tools // empty) as $t
+    | ($t | type) == "object"
+    and ($t | length) > 0
+    and ([$t[] | select(. != false)] | length) == 0
+  ' >/dev/null 2>&1
+}
+
 # The fenced form used by every backend that takes a single prompt argument.
 # codex is the exception: it gets the text on stdin, which it labels as a
 # distinct <stdin> block, so it needs no fence of its own.
@@ -277,6 +346,28 @@ fenced_message() { # fenced_message <prompt> <textfile>
 generate() {
   local backend="$1" prompt="$2" hf="$3" out="$4" errf="$5"
   local m; m=$(backend_model "$backend")
+  # The widget's "Default agent" backend just resolves to whichever agent
+  # `omarchy default agent` names and delegates to the matching concrete
+  # backend, so it carries the same prompt, tool hardening and quote handling
+  # as a direct choice. An agent wordsmith does not know how to drive is
+  # refused rather than run with its tools on.
+  if [[ "$backend" == "agent" ]]; then
+    local resolved; resolved=$(omarchy default agent 2>/dev/null || true)
+    case "$resolved" in
+      codex)        backend=codex ;;
+      claude)       backend=claude ;;
+      opencode)     backend=opencode-go ;;
+      "")
+        printf 'No default agent is set. Pick one with: omarchy default agent <name>\n' >"$errf"
+        return 1 ;;
+      *)
+        printf '%s is not an agent Wordsmith can run without its tools; choose ChatGPT, Claude or OpenCode instead.\n' "$resolved" >"$errf"
+        return 1 ;;
+    esac
+    # Reassigning the name is not enough: the model lookup above ran for the
+    # literal "agent" and returned nothing, so refresh it for the real backend.
+    m=$(backend_model "$backend")
+  fi
   # Every call goes through `timeout --foreground`. Without --foreground, GNU
   # timeout puts itself and the command in a fresh process group, which would
   # put the backend out of reach of the group signal `cancel` sends; with it,
@@ -287,24 +378,31 @@ generate() {
       # prompt and data stay separated without any quoting of their own.
       timeout --foreground "$TIMEOUT" codex exec \
           --skip-git-repo-check --ephemeral --ignore-user-config -s read-only \
-          -m "$m" -c model_reasoning_effort="$EFFORT" -o "$out" "$prompt" \
+          -m "$m" -c model_reasoning_effort="$EFFORT" "${CODEX_NO_TOOLS[@]}" \
+          -o "$out" "$prompt" \
           < "$hf" > /dev/null 2>"$errf"
       return $? ;;
 
     opencode-go|ollama-cloud)
       local ocdir="$STATE_DIR/oc"; mkdir -p "$ocdir"
-      # opencode takes a single positional message, so the stdin separation codex
-      # gives is not available - an explicit fence stands in for it.
-      # No --auto on purpose. opencode's agent can run a shell, and the input is
-      # untrusted email; without auto-approval an injected tool call stalls and
-      # gets killed by the timeout instead of executing. --dir keeps it in tmpfs
-      # rather than whatever directory the shell happens to be in.
-      timeout --foreground "$TIMEOUT" opencode run --pure --print-logs --log-level INFO \
-          --dir "$ocdir" -m "$m" "$(fenced_message "$prompt" "$hf")" > "$out" 2>"$errf"
+      # The prompt goes in on stdin now, not as a positional argument: opencode
+      # reads it when none is given, and that keeps the draft out of
+      # /proc/<pid>/cmdline. --agent wordsmith is the inline no-tools agent, and
+      # it is confirmed off before the text is sent - an environment config can
+      # be ignored silently, and falling back to the default agent would run
+      # with every tool on. --dir keeps it in tmpfs rather than whatever
+      # directory the shell happens to be in.
+      if ! opencode_tools_off; then
+        printf 'OpenCode would not confirm its tools are off, so the text was not sent.\n' >"$errf"
+        return 1
+      fi
+      fenced_message "$prompt" "$hf" | \
+        timeout --foreground "$TIMEOUT" env OPENCODE_CONFIG_CONTENT="$OPENCODE_AGENT_CONFIG" \
+          opencode run --pure --agent wordsmith --print-logs --log-level INFO \
+          --dir "$ocdir" -m "$m" > "$out" 2>"$errf"
       local rc=$?
-      # Unlike codex --ephemeral, opencode writes the prompt into
-      # ~/.local/share/opencode/opencode.db. Remember the session so it can be
-      # deleted once the result is on screen.
+      # opencode writes the prompt into ~/.local/share/opencode/opencode.db.
+      # Remember the session so it can be deleted once the result is on screen.
       local sid; sid=$(grep -oE 'created id=ses_[A-Za-z0-9]+' "$errf" | head -1 | sed 's/created id=//')
       [[ -n "$sid" ]] && printf '%s\n' "$sid" >> "$STATE_DIR/sessions"
       return $rc ;;
@@ -314,9 +412,13 @@ generate() {
       # to it and answers *as the sender's counterpart* instead of rewriting it —
       # tested, and it replied "I did not receive the numbers yet."
       #
-      # The prompt goes BEFORE the flags: --disallowed-tools is variadic, so with
-      # the prompt after it every word of the prompt is parsed as a tool name
-      # ("Permission deny rule \"Rewrite\" matches no known tool").
+      # --tools "" is the documented way to disable every tool, and
+      # --strict-mcp-config with no --mcp-config loads no MCP servers either, so
+      # their tools do not exist. That replaces the old --disallowed-tools
+      # allow-list, which needed a new tool name every time one was added.
+      #
+      # The prompt goes BEFORE the flags: --tools is variadic, so with the
+      # prompt after it every word of the prompt is parsed as a tool name.
       #
       # --system-prompt is load-bearing too. Claude Code's default persona is an
       # assistant, so without it the output arrives wrapped in "Here's a
@@ -324,7 +426,7 @@ generate() {
       timeout --foreground "$TIMEOUT" claude -p "$(fenced_message "$prompt" "$hf")" \
           --model "$m" \
           --system-prompt "$CLAUDE_SYSTEM" \
-          --disallowed-tools "Bash,Read,Write,Edit,WebFetch,WebSearch" \
+          --strict-mcp-config --tools "" \
           > "$out" 2>"$errf"
       return $? ;;
 
@@ -1026,6 +1128,7 @@ case "${1:-state}" in
   instruction-add)   shift; cmd_instruction_add "$@" ;;
   instruction-remove) shift; cmd_instruction_remove "${1:-}" ;;
   paste)   cmd_paste ;;
+  -v|--version|version) printf 'wordsmith %s\n' "$VERSION" ;;
   -h|--help|help)
     cat <<'USAGE'
 wordsmith — rewrite the selected text with Codex, on your ChatGPT plan.
@@ -1052,10 +1155,11 @@ custom requires --instruction.
   wordsmith models                        models offered for the current backend
 
 BACKEND ID is one of: codex (ChatGPT plan), opencode-go, ollama-cloud, ollama-local,
-claude. The two opencode backends persist prompts to opencode's database - the
-session is deleted after each rewrite, with retries. codex runs --ephemeral and
-claude -p keeps no transcript. ollama-local is a plain call to the Ollama daemon
-on localhost:11434 and never leaves this machine.
+claude, agent (whatever `omarchy default agent` names, with its tools off). The two
+opencode backends persist prompts to opencode's database - the session is deleted
+after each rewrite, with retries. codex runs --ephemeral and claude -p keeps no
+transcript. ollama-local is a plain call to the Ollama daemon on localhost:11434
+and never leaves this machine.
 
 A quoted thread below your draft (From:, -----Original Message-----, >, ...) is
 split off, never sent to the model, and reattached verbatim. --no-quoted

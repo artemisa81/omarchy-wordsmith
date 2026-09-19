@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "artemisa81.wordsmith",
   "name": "Wordsmith",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "author": "artemisa81",
   "license": "MIT",
   "description": "Rewrite the text you have selected — Outlook drafts, replies, anything — with Codex running on your existing ChatGPT plan. Select, press a key, read the result, paste.",
@@ -16,6 +16,12 @@
     "displayName": "Wordsmith",
     "description": "Rewrite selected text in five modes, review it against the original with anything still to fill in highlighted, and paste.",
     "category": "Productivity",
+    "aliases": [
+      "wordsmith",
+      "rewrite",
+      "rephrase",
+      "polish"
+    ],
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
@@ -53,13 +59,14 @@
         "key": "backend",
         "type": "enum",
         "label": "Default backend",
-        "description": "Which subscription answers by default. Four are plans you already pay for, not metered API keys; ollama-local talks to a local Ollama daemon and never leaves the machine. The panel switches live and that choice wins over this one. codex, claude and ollama-local write nothing to disk; the opencode backends record prompts in their own database and the session is deleted after each rewrite.",
+        "description": "Which subscription answers by default. Four are plans you already pay for, not metered API keys; ollama-local talks to a local Ollama daemon and never leaves the machine; Default agent runs whatever `omarchy default agent` names, with its tools off. The panel switches live and that choice wins over this one. codex, claude and ollama-local write nothing to disk; the opencode backends record prompts in their own database and the session is deleted after each rewrite.",
         "options": [
           "codex",
           "opencode-go",
           "ollama-cloud",
           "ollama-local",
-          "claude"
+          "claude",
+          "agent"
         ],
         "defaultValue": "codex"
       },

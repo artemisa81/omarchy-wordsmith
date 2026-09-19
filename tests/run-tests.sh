@@ -54,6 +54,11 @@ EOF
 
 cat > "$SB/bin/opencode" <<'EOF'
 #!/usr/bin/env bash
+if [[ "$1" == "debug" && "$2" == "agent" ]]; then
+  # Answers the tool-verification probe with every tool off.
+  printf '{"name":"%s","mode":"primary","tools":{"bash":false,"read":false,"write":false}}' "${3:-wordsmith}"
+  exit 0
+fi
 if [[ "$1" == "session" && "$2" == "delete" ]]; then
   n=$(( $(cat "$AUDIT/delete-attempts" 2>/dev/null || echo 0) + 1 ))
   echo "$n" > "$AUDIT/delete-attempts"
@@ -142,6 +147,7 @@ for pair in "codex:model" "opencode-go:goModel" "ollama-cloud:ollamaModel" \
   gotdef=$($WS models --backend "$b" | jq -r '.current')
   assert "manifest default for $k" "$gotdef" "$wantdef"
 done
+assert "script and manifest versions agree" "$($WS --version | awk '{print $2}')" "$(jq -r .version "$MANIFEST")"
 
 echo "== requires a real runtime dir =="
 env -u XDG_RUNTIME_DIR $WS state 2>&1 | grep -q "XDG_RUNTIME_DIR" \
@@ -365,8 +371,12 @@ assert "unicode survives the state file" "$($WS state | jq -r .original)" "à¸ªà¸
 $WS clear >/dev/null
 assert "clear resets" "$($WS state | jq -r .status)" "idle"
 assert "clear wipes history" "$($WS state | jq '.history | length')" "0"
-$WS backends | jq -e 'length == 5 and all(.[]; .model != "")' >/dev/null && ok "backends JSON" || bad "backends JSON" "malformed"
+$WS backends | jq -e 'length == 6 and ([.[] | select(.id != "agent") | .model] | all(. != ""))' >/dev/null && ok "backends JSON" || bad "backends JSON" "malformed"
 $WS modes | jq -e 'length == 5' >/dev/null && ok "modes JSON" || bad "modes JSON" "malformed"
+# The default-agent backend has no model of its own: it inherits whatever the
+# resolved agent uses, so an empty option list is correct, not a bug.
+$WS models --backend agent | jq -e '.backend == "agent" and (.options | length) == 0' >/dev/null \
+  && ok "default-agent backend offers no model list" || bad "agent backend" "unexpected model list"
 rm -f "$XDG_RUNTIME_DIR/wordsmith/state.json"
 $WS state | jq -e '.status == "idle" and (.history | length) == 0' >/dev/null && ok "fresh-boot state" || bad "fresh-boot state" "malformed"
 

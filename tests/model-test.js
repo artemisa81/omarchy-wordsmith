@@ -102,9 +102,12 @@ eq('droppedNote is blank when nothing is missing', M.droppedNote('Hello there', 
 
 // --------------------------------------------------------------- backends ----
 eq('backend label', M.backendLabel('codex'), 'ChatGPT')
+eq('default-agent label', M.backendLabel('agent'), 'Default agent')
 ok('codex is ephemeral', M.backendIsEphemeral('codex'))
 ok('opencode-go is not ephemeral', !M.backendIsEphemeral('opencode-go'))
+ok('agent is treated as ephemeral until resolved', M.backendIsEphemeral('agent'))
 has('local privacy note names the daemon', M.privacyNote('ollama-local'), 'localhost:11434')
+has('agent privacy note names the default agent', M.privacyNote('agent'), 'omarchy default agent')
 
 // ------------------------------------------------------------------ quoted ----
 eq('quoted note singular', M.quotedNote({ quotedLines: 1 }), '1 quoted line left untouched')
@@ -112,7 +115,7 @@ eq('quoted note plural', M.quotedNote({ quotedLines: 13 }), '13 quoted lines lef
 
 // ------------------------------------------------------------------ shapes ----
 eq('four fixed modes', M.MODES.length, 4)
-eq('five backends', M.BACKENDS.length, 5)
+eq('six backends', M.BACKENDS.length, 6)
 
 console.log('model-test: pass=' + pass + ' fail=' + fail)
 process.exit(fail === 0 ? 0 : 1)

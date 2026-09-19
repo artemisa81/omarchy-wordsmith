@@ -294,7 +294,8 @@ var BACKENDS = [
   { id: "opencode-go",  label: "OpenCode Go",  hint: "via opencode — prompt hits its database, session deleted after" },
   { id: "ollama-cloud", label: "Ollama Cloud", hint: "via opencode — prompt hits its database, session deleted after" },
   { id: "ollama-local", label: "Local",        hint: "Ollama on localhost:11434 — the words never leave this machine" },
-  { id: "claude",       label: "Claude",       hint: "claude CLI directly, not through opencode — no transcript kept" }
+  { id: "claude",       label: "Claude",       hint: "claude CLI directly, not through opencode — no transcript kept" },
+  { id: "agent",        label: "Default agent", hint: "whatever omarchy default agent names, run with its tools off" }
 ]
 
 function backendLabel(id) {
@@ -304,10 +305,12 @@ function backendLabel(id) {
 }
 
 // codex and claude keep the text off disk entirely; ollama-local never sends
-// it anywhere. The opencode backends need the session cleanup to have run.
+// it anywhere. The opencode backends need the session cleanup to have run. The
+// default-agent backend is delegated, and the panel cannot see which agent it
+// resolved to, so it is grouped with the ones that need no note.
 function backendIsEphemeral(id) {
   var v = String(id)
-  return v === "codex" || v === "claude" || v === "ollama-local"
+  return v === "codex" || v === "claude" || v === "ollama-local" || v === "agent"
 }
 
 // The footer used to hardcode codex's guarantees. With four backends the
@@ -326,6 +329,8 @@ function privacyNote(backend) {
       return base + "opencode records the prompt in its own database and Wordsmith deletes the session afterwards — the words go to Ollama Cloud."
     case "ollama-local":
       return base + "a plain call to your local Ollama daemon on localhost:11434 — the words never leave this machine."
+    case "agent":
+      return base + "the default agent backend runs whatever `omarchy default agent` names, with its tools off — the words go to whichever provider that agent is signed into, under the same terms as choosing that backend directly."
     default:
       return base + "The words leave this machine to whichever backend is selected."
   }

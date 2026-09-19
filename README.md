@@ -197,17 +197,26 @@ Work email is the main input here, so the handling is deliberate:
   to your own daemon on localhost and nowhere else.
 
 There is one caveat worth stating plainly, because the rest of this section
-sounds more absolute than it is. Only **ChatGPT (codex)** receives the draft on
-stdin. Every other backend is handed the text as a **command-line argument**,
-which any local process can read out of `/proc/<pid>/cmdline` while the rewrite
-runs. That is local-only and short-lived, and it is the price of how those CLIs
-accept a prompt — `claude -p` answers the mail as if it were addressed to it
-when the text arrives on stdin, and `opencode run` takes a positional message.
-The words still never touch the disk and never leave the machine except to the
-provider you chose; if argv exposure matters for a given mail, use codex or the
-local backend. That same argv limit is why a very large selection (over ~120 KB,
-reachable only if you raise **Maximum selection**) is refused on those backends
+sounds more absolute than it is. **ChatGPT (codex)** and the **OpenCode**
+backends receive the draft on stdin. **Claude** and **Ollama local** are handed
+the text as a **command-line argument**, which any local process can read out of
+`/proc/<pid>/cmdline` while the rewrite runs. That is local-only and
+short-lived, and it is the price of how those two CLIs accept a prompt: `claude
+-p` answers the mail as if it were addressed to it when the text arrives on
+stdin, and the Ollama call carries the prompt in its JSON body. The words still
+never touch the disk and never leave the machine except to the provider you
+chose; if argv exposure matters for a given mail, use codex, OpenCode or the
+local backend. That same argv limit is why a very large selection (over
+~120 KB, reachable only if you raise **Maximum selection**) is refused on Claude
 with a sentence telling you to switch to codex.
+
+Neither Claude nor codex nor OpenCode is trusted to keep its tools to itself:
+every prompt is sent with the agent's tools off. Claude runs with `--tools ""`
+and `--strict-mcp-config`; codex has each tool-bearing feature turned off by name
+over a read-only sandbox; OpenCode runs as an agent defined inline with
+`tools:{"*":false}` and `--pure`, and the plugin asks OpenCode what that agent
+resolved to and **refuses the run** unless every tool comes back off — a config
+that travels in the environment can be ignored without saying so.
 
 Text you are rewriting is frequently a mail somebody else wrote, which makes it
 untrusted input. Every prompt therefore instructs the model to treat the text as
@@ -217,7 +226,7 @@ quoted part is usually split off before that even matters.)
 
 ## Backends
 
-Five, switchable live from the **VIA** row in the panel. The choice persists in
+Six, switchable live from the **VIA** row in the panel. The choice persists in
 `~/.config/omarchy/wordsmith.json`, so it outlives the panel and the shell, and it
 outranks the widget's configured default.
 
@@ -234,11 +243,21 @@ toggle.
 | **OpenCode Go** | `opencode run -m opencode-go/…` | No — see below |
 | **Ollama Cloud** | `opencode run -m ollama-cloud/…` | No — see below |
 | **Ollama local** | a plain call to the daemon on `localhost:11434` | Yes — the words never leave this machine |
+| **Default agent** | whatever `omarchy default agent` names — codex, claude or opencode — run with its tools off | Follows the resolved backend |
 
-The fifth backend is for the mail that must not go anywhere at all: no CLI, no
-API key, no disk — just `curl` to your own Ollama daemon. It fails with a clear
-error when the daemon is not running, and it needs whatever model you picked
-pulled first (`ollama pull qwen3`). Speed is your hardware's, not a provider's.
+The sixth backend is the lazy one: it asks `omarchy default agent` which agent
+you have configured and delegates to the matching backend above, so a machine
+already set up for Omarchy needs no second choice about models. An agent
+Wordsmith cannot run with its tools off (anything other than codex, claude or
+opencode) is refused with a sentence saying so rather than run unsafely. It has
+no model list of its own — the VIA dropdown is empty for it — because the model
+is the resolved agent's; pick a concrete backend if you want to choose one.
+
+The Ollama local backend is for the mail that must not go anywhere at all: no
+CLI, no API key, no disk — just `curl` to your own Ollama daemon. It fails with a
+clear error when the daemon is not running, and it needs whatever model you
+picked pulled first (`ollama pull qwen3`). Speed is your hardware's, not a
+provider's.
 
 The two opencode backends record every prompt in `~/.local/share/opencode/opencode.db`.
 Wordsmith deletes the session after each rewrite, and because
@@ -265,7 +284,7 @@ outliers are the point.
 though one earlier call took 31s, so Ollama Cloud can spike. The ChatGPT and
 Claude defaults are within a second of each other and were steady. Every backend keeps the same
 prompts, so the quoted-thread guard, bracket placeholders and fact check behave
-identically across all five.
+identically across all six.
 
 Pick a model live from the dropdown under the VIA row — the list comes from the
 script, so there is one place to edit when a provider adds a model. To stop the
@@ -288,7 +307,7 @@ call.
 | OpenCode Go model | `deepseek-flash` (DeepSeek V4.1 Flash) | |
 | Ollama Cloud model | `glm-5.2` | |
 | Ollama local model | `qwen3` | Anything you have `ollama pull`ed works |
-| Reasoning effort | `low` | **ChatGPT (codex) only** — the other four backends ignore it. This matters a lot for codex |
+| Reasoning effort | `low` | **ChatGPT (codex) only** — the other backends ignore it, and a codex *default agent* inherits it. This matters a lot for codex |
 | Where to read the text from | `auto` | `auto` · `primary` · `clipboard` |
 | Never rewrite quoted threads | on | Leave it on unless you specifically want a whole thread reworded |
 | Also flag dropped names | off | Adds names to the dropped-fact check; noisy on legitimate rephrasing, so experimental |
